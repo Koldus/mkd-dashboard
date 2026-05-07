@@ -4,7 +4,9 @@
   "description": "Local workspace dashboard",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "work": "set WORKSPACE=work&& set PORT=3001&& node server.js",
+    "home": "set WORKSPACE=home&& set PORT=3002&& node server.js"
   },
   "dependencies": {
     "@notionhq/client": "^5.20.0",
