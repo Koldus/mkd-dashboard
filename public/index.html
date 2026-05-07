@@ -116,6 +116,8 @@
     function applyWorkspaceConfig(ws) {
       workspaceFeatures = new Set(ws.features);
 
+      document.title = ws.name;
+
       // Hide nav links and tabs for inactive features
       document.querySelectorAll('[data-feature]').forEach(el => {
         if (!workspaceFeatures.has(el.dataset.feature)) {

@@ -29,6 +29,7 @@
       document.querySelectorAll('[data-feature]').forEach(el => {
         if (!features.has(el.dataset.feature)) el.style.display = 'none';
       });
+      document.title = document.title.replace('Workspace', ws.name);
     });
   </script>
 
