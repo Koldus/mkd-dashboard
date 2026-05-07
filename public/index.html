@@ -4,6 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Workspace</title>
+  <link rel="icon" type="image/png" href="/favicon.png" />
   <link rel="stylesheet" href="style.css" />
   <script src="quotes.js"></script>
   <script src="resize.js" defer></script>
@@ -64,6 +65,7 @@
           <nav class="tab-nav">
             <button class="tab-btn active" data-tab="projects">Projects</button>
             <button class="tab-btn" data-tab="meetings" data-feature="meetings">Meetings</button>
+            <button class="tab-btn" data-tab="f1" data-feature="f1">F1</button>
           </nav>
           <div style="display:flex;align-items:center;gap:8px;">
             <label class="toggle-label" id="show-all-label">
@@ -183,6 +185,46 @@
       `).join('');
     }
 
+    // ── F1 tab ────────────────────────────────────────────────────────────────
+    function f1DotClass(metaStatus) {
+      const s = (metaStatus || '').toLowerCase();
+      if (s === 'in progress' || s === 'active') return 'active';
+      if (s === 'shaping') return 'backlog';
+      if (s === 'done') return 'done';
+      return 'on-hold';
+    }
+
+    function renderF1Projects(projects) {
+      const container = document.getElementById('section-content');
+      if (!projects.length) {
+        container.innerHTML = '<p class="empty">No F1 projects found.</p>';
+        return;
+      }
+
+      const groups = {};
+      for (const p of projects) {
+        if (!groups[p.status]) groups[p.status] = [];
+        groups[p.status].push(p);
+      }
+
+      container.innerHTML = Object.entries(groups).map(([status, items]) => `
+        <div class="project-group">
+          <div class="project-group-title">${status}</div>
+          <ul class="project-list">
+            ${items.map(p => {
+              const dotClass = f1DotClass(p.meta.status);
+              const hint = [p.meta.type, p.meta.timeline].filter(Boolean).join(' · ');
+              return `<li class="project-item">
+                <span class="status-dot status-${dotClass}"></span>
+                <a class="project-name" href="/project.html?root=f1&path=${encodeURIComponent(p.path)}">${p.name}</a>
+                ${hint ? `<span class="project-status">${hint}</span>` : ''}
+              </li>`;
+            }).join('')}
+          </ul>
+        </div>
+      `).join('');
+    }
+
     // ── Meetings tab ──────────────────────────────────────────────────────────
     function renderMeetings() {
       const container = document.getElementById('section-content');
@@ -223,6 +265,13 @@
         renderProjects(document.getElementById('show-all-toggle').checked);
       } else if (tab === 'meetings') {
         renderMeetings();
+      } else if (tab === 'f1') {
+        const container = document.getElementById('section-content');
+        container.innerHTML = '<p class="empty">Loading…</p>';
+        fetch('/api/f1/projects')
+          .then(r => r.json())
+          .then(data => renderF1Projects(data))
+          .catch(() => { container.innerHTML = '<p class="empty">Failed to load F1 projects.</p>'; });
       }
     }
 
