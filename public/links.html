@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Links — Workspace</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <header>
+    <div class="header-left">
+      <a href="/" class="header-back">&#8592;</a>
+      <span class="header-title">Links</span>
+    </div>
+    <div class="header-right">
+      <span class="header-date" id="header-date"></span>
+      <a href="/editor.html?root=notebook" class="header-link" data-feature="notebook">Notebook</a>
+      <a href="/links.html" class="header-link">Links</a>
+    </div>
+  </header>
+
+  <script>
+    fetch('/api/workspace').then(r => r.json()).then(ws => {
+      const features = new Set(ws.features);
+      document.querySelectorAll('[data-feature]').forEach(el => {
+        if (!features.has(el.dataset.feature)) el.style.display = 'none';
+      });
+    });
+  </script>
+
+  <main class="links-page">
+    <div class="links-sections" id="links-sections"></div>
+  </main>
+
+  <script>
+    document.getElementById('header-date').textContent =
+      new Date().toLocaleDateString('en-GB', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+
+    // data shape: [{ section, widgets: [{ category, links: [{label, url}] }] }]
+    let data = [];
+
+    function esc(str) {
+      const d = document.createElement('div');
+      d.textContent = str ?? '';
+      return d.innerHTML;
+    }
+
+    function domain(url) {
+      try { return new URL(url).hostname; } catch { return url; }
+    }
+
+    function faviconPath(url) {
+      try {
+        const host = new URL(url).hostname;
+        if (!host) return null;
+        return `/icons/${host}.png`;
+      } catch { return null; }
+    }
+
+    async function save() {
+      await fetch('/api/links', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+      });
+    }
+
+    // ── HTML builders ─────────────────────────────────────────────────────────
+
+    function linkItemHTML(si, ci, li, link) {
+      const icon = faviconPath(link.url);
+      const iconHtml = icon
+        ? `<img class="links-icon" src="${icon}" alt="" onerror="this.src='/icons/_default.svg';this.onerror=null" />`
+        : `<img class="links-icon" src="/icons/_default.svg" alt="" />`;
+      return `
+        <li class="links-item" data-si="${si}" data-ci="${ci}" data-li="${li}">
+          <div class="links-item-main">
+            <a class="links-link" href="${esc(link.url)}" target="_blank" rel="noopener noreferrer">${iconHtml}${esc(link.label)}</a>
+            <span class="links-url-hint">${esc(domain(link.url))}</span>
+          </div>
+          <div class="links-item-actions">
+            <button class="links-action-btn" data-action="edit"   data-si="${si}" data-ci="${ci}" data-li="${li}">Edit</button>
+            <button class="links-action-btn links-action-delete"  data-action="delete" data-si="${si}" data-ci="${ci}" data-li="${li}">×</button>
+          </div>
+        </li>`;
+    }
+
+    function widgetHTML(si, ci, widget) {
+      return `
+        <div class="links-card panel" data-si="${si}" data-ci="${ci}">
+          <div class="links-card-header">
+            <span class="links-card-title">${esc(widget.category)}</span>
+            <button class="links-delete-widget" data-si="${si}" data-ci="${ci}" title="Delete widget">×</button>
+          </div>
+          <ul class="links-list">
+            ${widget.links.map((link, li) => linkItemHTML(si, ci, li, link)).join('')}
+          </ul>
+          <div class="links-add-area">
+            <button class="add-link-trigger" data-si="${si}" data-ci="${ci}">+ Add link</button>
+            <form class="add-link-form" data-si="${si}" data-ci="${ci}">
+              <input class="link-input"          name="label" placeholder="Label"        autocomplete="off" />
+              <input class="link-input link-input-url" name="url" placeholder="https://…" autocomplete="off" />
+              <div class="link-form-actions">
+                <button type="submit" class="link-save-btn">Save</button>
+                <button type="button" class="link-cancel-btn">Cancel</button>
+              </div>
+            </form>
+          </div>
+        </div>`;
+    }
+
+    function sectionHTML(si, section) {
+      const widgets = section.widgets.map((w, ci) => widgetHTML(si, ci, w)).join('');
+      const addWidget = `
+        <div class="links-card-add panel" data-si="${si}">
+          <button class="add-widget-trigger" data-si="${si}">+ Add widget</button>
+          <form class="add-widget-form" data-si="${si}">
+            <input class="link-input" name="category" placeholder="Widget name" autocomplete="off" />
+            <div class="link-form-actions">
+              <button type="submit" class="link-save-btn">Add</button>
+              <button type="button" class="link-cancel-btn">Cancel</button>
+            </div>
+          </form>
+        </div>`;
+
+      return `
+        <div class="links-section" data-si="${si}">
+          <div class="links-section-header">
+            <span class="links-section-title">${esc(section.section)}</span>
+            <div class="links-section-line"></div>
+            <button class="links-delete-section" data-si="${si}" title="Delete section">×</button>
+          </div>
+          <div class="links-grid">
+            ${widgets}
+            ${addWidget}
+          </div>
+        </div>`;
+    }
+
+    // ── Render ────────────────────────────────────────────────────────────────
+
+    function render() {
+      const container = document.getElementById('links-sections');
+
+      const sections = data.map((s, si) => sectionHTML(si, s)).join('');
+
+      const addSection = `
+        <div class="links-add-section-area">
+          <button class="add-section-trigger" id="add-section-trigger">
+            <span>+ Add section</span>
+          </button>
+          <form class="add-section-form" id="add-section-form">
+            <input class="link-input" id="add-section-input" placeholder="Section name" autocomplete="off" />
+            <div class="link-form-actions">
+              <button type="submit" class="link-save-btn">Add</button>
+              <button type="button" class="link-cancel-btn" id="add-section-cancel">Cancel</button>
+            </div>
+          </form>
+        </div>`;
+
+      container.innerHTML = sections + addSection;
+      bindEvents();
+    }
+
+    // ── Events ────────────────────────────────────────────────────────────────
+
+    function bindEvents() {
+      // Delete section
+      document.querySelectorAll('.links-delete-section').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const si  = parseInt(btn.dataset.si);
+          const sec = data[si];
+          const hasLinks = sec.widgets.some(w => w.links.length > 0);
+          if (hasLinks && !confirm(`Delete section "${sec.section}" and all its contents?`)) return;
+          data.splice(si, 1);
+          save().then(render);
+        });
+      });
+
+      // Delete widget
+      document.querySelectorAll('.links-delete-widget').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const si = parseInt(btn.dataset.si);
+          const ci = parseInt(btn.dataset.ci);
+          const widget = data[si].widgets[ci];
+          if (widget.links.length > 0 && !confirm(`Delete "${widget.category}" and all its links?`)) return;
+          data[si].widgets.splice(ci, 1);
+          save().then(render);
+        });
+      });
+
+      // Link actions: edit / delete
+      document.querySelectorAll('[data-action]').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const si = parseInt(btn.dataset.si);
+          const ci = parseInt(btn.dataset.ci);
+          const li = parseInt(btn.dataset.li);
+          if (btn.dataset.action === 'delete') {
+            data[si].widgets[ci].links.splice(li, 1);
+            save().then(render);
+          } else {
+            startEditLink(si, ci, li);
+          }
+        });
+      });
+
+      // Add link: show form
+      document.querySelectorAll('.add-link-trigger').forEach(btn => {
+        btn.addEventListener('click', () => {
+          btn.style.display = 'none';
+          const form = btn.nextElementSibling;
+          form.classList.add('open');
+          form.querySelector('[name="label"]').focus();
+        });
+      });
+
+      // Add link: submit
+      document.querySelectorAll('.add-link-form').forEach(form => {
+        form.addEventListener('submit', async e => {
+          e.preventDefault();
+          const si    = parseInt(form.dataset.si);
+          const ci    = parseInt(form.dataset.ci);
+          const label = form.querySelector('[name="label"]').value.trim();
+          const url   = form.querySelector('[name="url"]').value.trim();
+          if (!label || !url) return;
+          data[si].widgets[ci].links.push({ label, url });
+          await save();
+          render();
+        });
+        form.querySelector('.link-cancel-btn').addEventListener('click', render);
+      });
+
+      // Add widget: show form
+      document.querySelectorAll('.add-widget-trigger').forEach(btn => {
+        btn.addEventListener('click', () => {
+          btn.style.display = 'none';
+          const form = btn.nextElementSibling;
+          form.classList.add('open');
+          form.querySelector('[name="category"]').focus();
+        });
+      });
+
+      // Add widget: submit
+      document.querySelectorAll('.add-widget-form').forEach(form => {
+        form.addEventListener('submit', async e => {
+          e.preventDefault();
+          const si   = parseInt(form.dataset.si);
+          const name = form.querySelector('[name="category"]').value.trim();
+          if (!name) return;
+          data[si].widgets.push({ category: name, links: [] });
+          await save();
+          render();
+        });
+        form.querySelector('.link-cancel-btn').addEventListener('click', render);
+      });
+
+      // Add section: show form
+      document.getElementById('add-section-trigger').addEventListener('click', () => {
+        document.getElementById('add-section-trigger').style.display = 'none';
+        const form = document.getElementById('add-section-form');
+        form.classList.add('open');
+        document.getElementById('add-section-input').focus();
+      });
+
+      // Add section: submit
+      document.getElementById('add-section-form').addEventListener('submit', async e => {
+        e.preventDefault();
+        const name = document.getElementById('add-section-input').value.trim();
+        if (!name) return;
+        data.push({ section: name, widgets: [] });
+        await save();
+        render();
+      });
+
+      document.getElementById('add-section-cancel').addEventListener('click', render);
+    }
+
+    // ── Inline link edit ──────────────────────────────────────────────────────
+
+    function startEditLink(si, ci, li) {
+      const item = document.querySelector(`.links-item[data-si="${si}"][data-ci="${ci}"][data-li="${li}"]`);
+      const link = data[si].widgets[ci].links[li];
+
+      item.innerHTML = `
+        <form class="link-edit-form">
+          <input class="link-input"          name="label" value="${esc(link.label)}" autocomplete="off" />
+          <input class="link-input link-input-url" name="url"   value="${esc(link.url)}"   autocomplete="off" />
+          <div class="link-form-actions">
+            <button type="submit" class="link-save-btn">Save</button>
+            <button type="button" class="link-cancel-btn">Cancel</button>
+          </div>
+        </form>`;
+
+      const form = item.querySelector('form');
+      form.querySelector('[name="label"]').focus();
+
+      form.addEventListener('submit', async e => {
+        e.preventDefault();
+        const label = form.querySelector('[name="label"]').value.trim();
+        const url   = form.querySelector('[name="url"]').value.trim();
+        if (!label || !url) return;
+        data[si].widgets[ci].links[li] = { label, url };
+        await save();
+        render();
+      });
+
+      form.querySelector('.link-cancel-btn').addEventListener('click', render);
+    }
+
+    // ── Init ──────────────────────────────────────────────────────────────────
+
+    fetch('/api/links')
+      .then(r => r.json())
+      .then(d => { data = d; render(); });
+  </script>
+</body>
+</html>

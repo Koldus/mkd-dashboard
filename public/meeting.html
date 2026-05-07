@@ -1,0 +1,570 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Meeting — Workspace</title>
+  <link rel="stylesheet" href="style.css" />
+  <script src="resize.js" defer></script>
+</head>
+<body>
+
+  <header>
+    <div class="header-left">
+      <a href="/" class="header-back">&#8592;</a>
+      <span class="header-title" id="meeting-title">Meeting</span>
+    </div>
+    <div class="header-right">
+      <span class="header-date" id="header-date"></span>
+      <a href="/editor.html?root=notebook" class="header-link" data-feature="notebook">Notebook</a>
+      <a href="/links.html" class="header-link">Links</a>
+    </div>
+  </header>
+
+  <script>
+    fetch('/api/workspace').then(r => r.json()).then(ws => {
+      const features = new Set(ws.features);
+      document.querySelectorAll('[data-feature]').forEach(el => {
+        if (!features.has(el.dataset.feature)) el.style.display = 'none';
+      });
+    });
+  </script>
+
+  <main class="meeting-page">
+
+    <nav class="meeting-sidebar" id="meeting-nav"></nav>
+
+    <div class="split-portion">
+      <div class="col-left">
+        <section class="panel" id="panel-topics">
+          <h2 class="panel-title">Future Discussion Topics</h2>
+          <div class="panel-content" id="topics-content"></div>
+        </section>
+      </div>
+      <div class="resize-handle"></div>
+      <div class="col-right">
+        <section class="panel" id="panel-decisions">
+          <h2 class="panel-title">Decisions</h2>
+          <div class="panel-content" id="decisions-content"></div>
+        </section>
+        <section class="panel" id="panel-actions">
+          <h2 class="panel-title">Follow-up Actions</h2>
+          <div class="panel-content" id="actions-content"></div>
+        </section>
+      </div>
+    </div>
+
+  </main>
+
+  <script>
+    document.getElementById('header-date').textContent =
+      new Date().toLocaleDateString('en-GB', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+
+    const params = new URLSearchParams(location.search);
+    const meetingPath = params.get('path') || '';
+
+    function humanize(s) {
+      return s.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+    }
+    function esc(s) {
+      return String(s ?? '')
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+
+    const title = humanize(meetingPath.split('/').pop().replace('.md', ''));
+    document.getElementById('meeting-title').textContent = title;
+    document.title = `${title} — Workspace`;
+
+    // ── State ─────────────────────────────────────────────────────────────────
+
+    let sectionsData = {};
+    const listStates = {};
+    const LIST_SECTIONS = ['Future Discussion Topics', 'Follow-up Actions'];
+    const SECTION_CONTAINERS = {
+      'Future Discussion Topics': 'topics-content',
+      'Follow-up Actions': 'actions-content',
+    };
+
+    function sectionToState(section) {
+      if (!section?.items) return [];
+      return section.items.map(({ type, text, checked, indent }) => ({
+        type, text, checked: !!checked, indent: indent || 0,
+      }));
+    }
+
+    function stateToMarkdown(items) {
+      return items.map(item => {
+        if (item.type === 'heading') return `### ${item.text}`;
+        return `${'  '.repeat(item.indent || 0)}- ${item.checked ? '[x]' : '[ ]'} ${item.text}`;
+      }).join('\n');
+    }
+
+    async function saveSectionState(sectionName) {
+      const content = stateToMarkdown(listStates[sectionName] || []);
+      try {
+        const result = await api('/api/meeting/replace-section', { section: sectionName, content });
+        if (result.sections) sectionsData = result.sections;
+      } catch (e) { console.error(e); }
+      renderListPanelFromState(sectionName);
+    }
+
+    // ── Rendering ─────────────────────────────────────────────────────────────
+
+    function renderAll(data) {
+      sectionsData = data;
+      LIST_SECTIONS.forEach(s => {
+        listStates[s] = sectionToState(data[s]);
+        renderListPanelFromState(s);
+      });
+      renderTablePanel('decisions-content', 'Decisions');
+    }
+
+    function renderListPanelFromState(sectionName) {
+      const el = document.getElementById(SECTION_CONTAINERS[sectionName]);
+      el.innerHTML = buildListHTML(listStates[sectionName] || [], sectionName);
+      wireListHandlers(el, sectionName);
+    }
+
+    function buildListHTML(items, sectionName) {
+      // Group items by preceding ### heading
+      const groups = [];
+      let cur = { headingItem: null, headingIdx: null, tasks: [] };
+      for (let i = 0; i < items.length; i++) {
+        const item = items[i];
+        if (item.type === 'heading') {
+          groups.push(cur);
+          cur = { headingItem: item, headingIdx: i, tasks: [] };
+        } else {
+          cur.tasks.push({ ...item, flatIdx: i });
+        }
+      }
+      groups.push(cur);
+
+      let html = '';
+      for (const g of groups) {
+        html += `<div class="meeting-group">`;
+
+        if (g.headingItem) {
+          html += `<div class="meeting-section-heading" data-idx="${g.headingIdx}">
+            <span class="heading-text">${esc(g.headingItem.text)}</span>
+            <div class="heading-controls">
+              <button class="heading-edit-btn" title="Rename">✎</button>
+              <button class="heading-delete-btn" title="Delete section">×</button>
+            </div>
+          </div>`;
+        }
+
+        html += `<div class="meeting-group-tasks">`;
+        for (const t of g.tasks) {
+          const pad = (t.indent || 0) * 20;
+          html += `<div class="meeting-task" draggable="true" data-idx="${t.flatIdx}" style="padding-left:${8 + pad}px">
+            <span class="drag-handle" title="Drag to reorder">⠿</span>
+            <input type="checkbox" ${t.checked ? 'checked' : ''}>
+            <span class="task-text">${esc(t.text)}</span>
+            <div class="task-controls">
+              <button class="indent-btn outdent-btn" title="Outdent">‹</button>
+              <button class="indent-btn do-indent-btn" title="Indent">›</button>
+              <button class="item-delete-btn" title="Delete">×</button>
+            </div>
+          </div>`;
+        }
+        html += `</div>`;
+
+        const hAttr = g.headingIdx !== null ? g.headingIdx : '';
+        html += `<div class="add-item-row" data-heading-idx="${hAttr}">
+          <button class="add-item-btn">+ Add item</button>
+          <input type="text" class="add-item-input" placeholder="New item…">
+        </div>`;
+
+        html += `</div>`; // meeting-group
+      }
+
+      html += `<div class="add-subsection-row">
+        <button class="add-subsection-btn">+ Add section</button>
+        <input type="text" class="add-subsection-input" placeholder="Section name…">
+      </div>`;
+
+      return html;
+    }
+
+    // ── List event wiring ─────────────────────────────────────────────────────
+
+    let _dragSrcIdx = null, _dragSectionName = null, _mouseTarget = null;
+
+    function wireListHandlers(el, sectionName) {
+      // Drag & drop
+      el.querySelectorAll('.meeting-task').forEach(task => {
+        task.addEventListener('mousedown', e => { _mouseTarget = e.target; });
+
+        task.addEventListener('dragstart', e => {
+          if (!_mouseTarget?.closest('.drag-handle')) { e.preventDefault(); return; }
+          _dragSrcIdx = parseInt(task.dataset.idx);
+          _dragSectionName = sectionName;
+          task.classList.add('drag-source');
+          e.dataTransfer.effectAllowed = 'move';
+          e.dataTransfer.setData('text/plain', '');
+        });
+
+        task.addEventListener('dragend', () => {
+          task.classList.remove('drag-source');
+          el.querySelectorAll('.drop-above, .drop-below').forEach(t => t.classList.remove('drop-above', 'drop-below'));
+        });
+
+        task.addEventListener('dragover', e => {
+          if (_dragSectionName !== sectionName) return;
+          e.preventDefault();
+          el.querySelectorAll('.drop-above, .drop-below').forEach(t => t.classList.remove('drop-above', 'drop-below'));
+          const rect = task.getBoundingClientRect();
+          task.classList.add(e.clientY < rect.top + rect.height / 2 ? 'drop-above' : 'drop-below');
+        });
+
+        task.addEventListener('dragleave', () => task.classList.remove('drop-above', 'drop-below'));
+
+        task.addEventListener('drop', e => {
+          e.preventDefault();
+          if (_dragSrcIdx === null || _dragSectionName !== sectionName) return;
+          const targetIdx = parseInt(task.dataset.idx);
+          const insertAfter = task.classList.contains('drop-below');
+          if (_dragSrcIdx !== targetIdx) {
+            const items = listStates[sectionName];
+            const [moved] = items.splice(_dragSrcIdx, 1);
+            let ti = targetIdx > _dragSrcIdx ? targetIdx - 1 : targetIdx;
+            items.splice(insertAfter ? ti + 1 : ti, 0, moved);
+          }
+          _dragSrcIdx = null; _dragSectionName = null;
+          saveSectionState(sectionName);
+        });
+      });
+
+      // Checkbox
+      el.querySelectorAll('.meeting-task input[type="checkbox"]').forEach(cb => {
+        cb.addEventListener('change', () => {
+          listStates[sectionName][parseInt(cb.closest('.meeting-task').dataset.idx)].checked = cb.checked;
+          saveSectionState(sectionName);
+        });
+      });
+
+      // Delete task
+      el.querySelectorAll('.meeting-task .item-delete-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          listStates[sectionName].splice(parseInt(btn.closest('.meeting-task').dataset.idx), 1);
+          saveSectionState(sectionName);
+        });
+      });
+
+      // Outdent
+      el.querySelectorAll('.outdent-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const item = listStates[sectionName][parseInt(btn.closest('.meeting-task').dataset.idx)];
+          if ((item.indent || 0) > 0) { item.indent--; saveSectionState(sectionName); }
+        });
+      });
+
+      // Indent
+      el.querySelectorAll('.do-indent-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const item = listStates[sectionName][parseInt(btn.closest('.meeting-task').dataset.idx)];
+          item.indent = (item.indent || 0) + 1;
+          saveSectionState(sectionName);
+        });
+      });
+
+      // Double-click to edit task text
+      el.querySelectorAll('.task-text').forEach(span => {
+        span.addEventListener('dblclick', () => startTaskEdit(span, sectionName));
+      });
+
+      // Heading rename
+      el.querySelectorAll('.heading-edit-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const hEl = btn.closest('.meeting-section-heading');
+          startHeadingEdit(hEl, parseInt(hEl.dataset.idx), sectionName);
+        });
+      });
+
+      // Heading delete
+      el.querySelectorAll('.heading-delete-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const hEl = btn.closest('.meeting-section-heading');
+          deleteHeading(parseInt(hEl.dataset.idx), sectionName);
+        });
+      });
+
+      // Add item — per group
+      el.querySelectorAll('.add-item-row').forEach(row => {
+        const btn = row.querySelector('.add-item-btn');
+        const input = row.querySelector('.add-item-input');
+        btn.addEventListener('click', () => { btn.style.display = 'none'; input.style.display = 'block'; input.focus(); });
+        const dismiss = () => { input.value = ''; input.style.display = 'none'; btn.style.display = ''; };
+        input.addEventListener('keydown', async e => {
+          if (e.key === 'Enter') {
+            const text = input.value.trim();
+            if (!text) { dismiss(); return; }
+            const items = listStates[sectionName];
+            const hStr = row.dataset.headingIdx;
+            let insertAt;
+            if (hStr === '') {
+              const fi = items.findIndex(i => i.type === 'heading');
+              insertAt = fi === -1 ? items.length : fi;
+            } else {
+              const hIdx = parseInt(hStr);
+              const ni = items.findIndex((item, idx) => idx > hIdx && item.type === 'heading');
+              insertAt = ni === -1 ? items.length : ni;
+            }
+            items.splice(insertAt, 0, { type: 'task', text, checked: false, indent: 0 });
+            dismiss();
+            await saveSectionState(sectionName);
+          }
+          if (e.key === 'Escape') dismiss();
+        });
+        input.addEventListener('blur', dismiss);
+      });
+
+      // Add subsection
+      const subBtn = el.querySelector('.add-subsection-btn');
+      const subInput = el.querySelector('.add-subsection-input');
+      if (subBtn && subInput) {
+        subBtn.addEventListener('click', () => { subBtn.style.display = 'none'; subInput.style.display = 'block'; subInput.focus(); });
+        const dismissSub = () => { subInput.value = ''; subInput.style.display = 'none'; subBtn.style.display = ''; };
+        subInput.addEventListener('keydown', async e => {
+          if (e.key === 'Enter') {
+            const text = subInput.value.trim();
+            if (!text) { dismissSub(); return; }
+            listStates[sectionName].push({ type: 'heading', text });
+            dismissSub();
+            await saveSectionState(sectionName);
+          }
+          if (e.key === 'Escape') dismissSub();
+        });
+        subInput.addEventListener('blur', dismissSub);
+      }
+    }
+
+    function startTaskEdit(span, sectionName) {
+      const taskEl = span.closest('.meeting-task');
+      const idx = parseInt(taskEl.dataset.idx);
+      const current = span.textContent;
+      const input = document.createElement('input');
+      input.type = 'text'; input.value = current; input.className = 'inline-edit-input';
+      span.replaceWith(input); input.focus(); input.select();
+      let saved = false;
+      const save = async () => {
+        if (saved) return; saved = true;
+        const newText = input.value.trim();
+        if (newText && newText !== current) {
+          listStates[sectionName][idx].text = newText;
+          await saveSectionState(sectionName);
+        } else {
+          renderListPanelFromState(sectionName);
+        }
+      };
+      input.addEventListener('keydown', e => {
+        if (e.key === 'Enter') save();
+        if (e.key === 'Escape') { saved = true; renderListPanelFromState(sectionName); }
+      });
+      input.addEventListener('blur', save);
+    }
+
+    function startHeadingEdit(hEl, idx, sectionName) {
+      const span = hEl.querySelector('.heading-text');
+      const controls = hEl.querySelector('.heading-controls');
+      const current = span.textContent;
+      const input = document.createElement('input');
+      input.type = 'text'; input.value = current; input.className = 'inline-edit-input';
+      span.replaceWith(input);
+      if (controls) controls.style.display = 'none';
+      input.focus(); input.select();
+      let saved = false;
+      const save = async () => {
+        if (saved) return; saved = true;
+        const newText = input.value.trim();
+        if (newText && newText !== current) {
+          listStates[sectionName][idx].text = newText;
+          await saveSectionState(sectionName);
+        } else {
+          renderListPanelFromState(sectionName);
+        }
+      };
+      input.addEventListener('keydown', e => {
+        if (e.key === 'Enter') save();
+        if (e.key === 'Escape') { saved = true; renderListPanelFromState(sectionName); }
+      });
+      input.addEventListener('blur', save);
+    }
+
+    function deleteHeading(idx, sectionName) {
+      const items = listStates[sectionName];
+      let end = items.length;
+      for (let i = idx + 1; i < items.length; i++) {
+        if (items[i].type === 'heading') { end = i; break; }
+      }
+      items.splice(idx, end - idx);
+      saveSectionState(sectionName);
+    }
+
+    // ── Table panel ───────────────────────────────────────────────────────────
+
+    function renderTablePanel(containerId, sectionName) {
+      const el = document.getElementById(containerId);
+      const data = sectionsData[sectionName];
+      const headers = data?.headers || ['Date', 'Decision', 'Reason'];
+      const rows = data?.rows || [];
+
+      let html = `<table class="meeting-table">
+        <thead><tr>
+          ${headers.map(h => `<th>${esc(h)}</th>`).join('')}
+          <th style="width:28px"></th>
+        </tr></thead>
+        <tbody>`;
+
+      if (rows.length === 0) {
+        html += `<tr><td colspan="${headers.length + 1}" class="muted-msg table-empty">No decisions logged yet.</td></tr>`;
+      }
+      for (const row of rows) {
+        html += `<tr data-line="${esc(row.line)}">
+          ${row.cells.map((c, i) => `<td class="editable-cell" data-col="${i}">${esc(c)}</td>`).join('')}
+          <td><button class="item-delete-btn" title="Delete">×</button></td>
+        </tr>`;
+      }
+
+      html += `</tbody></table>
+        <div class="add-decision-trigger">
+          <button class="add-item-btn add-decision-open">+ Add decision</button>
+          <div class="add-decision-form">
+            <input class="df-date" type="text" placeholder="Date">
+            <input class="df-decision" type="text" placeholder="Decision">
+            <input class="df-reason" type="text" placeholder="Reason (optional)">
+            <div class="df-actions">
+              <button class="df-save">Add</button>
+              <button class="df-cancel">Cancel</button>
+            </div>
+          </div>
+        </div>`;
+
+      el.innerHTML = html;
+      wireTableHandlers(el, sectionName, containerId);
+    }
+
+    function wireTableHandlers(el, sectionName, containerId) {
+      // Delete row
+      el.querySelectorAll('tr[data-line] .item-delete-btn').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          const line = btn.closest('tr').dataset.line;
+          const { sections: s } = await api('/api/meeting/delete-line', { line });
+          sectionsData = s;
+          renderTablePanel(containerId, sectionName);
+        });
+      });
+
+      // Click cell to edit
+      el.querySelectorAll('.editable-cell').forEach(td => {
+        td.addEventListener('click', () => startCellEdit(td, el, sectionName, containerId));
+      });
+
+      // Add decision form
+      const openBtn = el.querySelector('.add-decision-open');
+      const form = el.querySelector('.add-decision-form');
+      const dateInput = el.querySelector('.df-date');
+      const decInput = el.querySelector('.df-decision');
+      const reaInput = el.querySelector('.df-reason');
+      const saveBtn = el.querySelector('.df-save');
+      const cancelBtn = el.querySelector('.df-cancel');
+
+      openBtn.addEventListener('click', () => {
+        openBtn.style.display = 'none';
+        form.style.display = 'flex';
+        dateInput.value = new Date().toISOString().slice(0, 10);
+        decInput.focus();
+      });
+
+      const closeForm = () => {
+        form.style.display = 'none';
+        openBtn.style.display = '';
+        decInput.value = ''; reaInput.value = '';
+      };
+
+      cancelBtn.addEventListener('click', closeForm);
+
+      saveBtn.addEventListener('click', async () => {
+        const decision = decInput.value.trim();
+        if (!decision) return;
+        const { sections: s } = await api('/api/meeting/add-decision', {
+          date: dateInput.value.trim(), decision, reason: reaInput.value.trim(),
+        });
+        sectionsData = s;
+        closeForm();
+        renderTablePanel(containerId, sectionName);
+      });
+    }
+
+    function startCellEdit(td, container, sectionName, containerId) {
+      if (td.querySelector('input')) return;
+      const tr = td.closest('tr');
+      const original = td.textContent;
+      td.innerHTML = `<input type="text" class="inline-edit-input" value="${esc(original)}">`;
+      const input = td.querySelector('input');
+      input.focus(); input.select();
+      let saved = false;
+      const save = async () => {
+        if (saved) return; saved = true;
+        const oldLine = tr.dataset.line;
+        const cells = Array.from(tr.querySelectorAll('.editable-cell')).map(c => {
+          const inp = c.querySelector('input');
+          return inp ? inp.value.trim() : c.textContent.trim();
+        });
+        const newLine = `| ${cells.join(' | ')} |`;
+        if (newLine !== oldLine) {
+          const { sections: s } = await api('/api/meeting/update-line', { oldLine, newLine });
+          sectionsData = s;
+          renderTablePanel(containerId, sectionName);
+        } else {
+          td.textContent = original;
+        }
+      };
+      input.addEventListener('keydown', e => {
+        if (e.key === 'Enter') save();
+        if (e.key === 'Escape') { saved = true; td.textContent = original; }
+      });
+      input.addEventListener('blur', save);
+    }
+
+    // ── API helper ────────────────────────────────────────────────────────────
+
+    async function api(endpoint, body) {
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: meetingPath, ...body }),
+      });
+      return res.json();
+    }
+
+    // ── Sidebar ───────────────────────────────────────────────────────────────
+
+    function loadSidebar() {
+      fetch('/api/meetings')
+        .then(r => r.json())
+        .then(data => {
+          const nav = document.getElementById('meeting-nav');
+          const groups = Object.entries(data).filter(([, items]) => items.length > 0);
+          nav.innerHTML = groups.map(([category, items]) => `
+            <div class="sidebar-group-title">${category}</div>
+            ${items.map(m => `
+              <a class="sidebar-meeting-link ${m.path === meetingPath ? 'active' : ''}"
+                 href="/meeting.html?path=${encodeURIComponent(m.path)}">${m.name}</a>
+            `).join('')}
+          `).join('');
+        });
+    }
+
+    // ── Init ──────────────────────────────────────────────────────────────────
+
+    fetch(`/api/meeting?path=${encodeURIComponent(meetingPath)}`)
+      .then(r => r.json())
+      .then(renderAll);
+
+    loadSidebar();
+  </script>
+</body>
+</html>

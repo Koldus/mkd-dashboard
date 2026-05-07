@@ -1,0 +1,824 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Project — Workspace</title>
+  <link rel="stylesheet" href="https://uicdn.toast.com/editor/latest/toastui-editor.min.css" />
+  <link rel="stylesheet" href="https://uicdn.toast.com/editor/latest/toastui-editor-dark.min.css" />
+  <link rel="stylesheet" href="style.css" />
+  <script src="https://uicdn.toast.com/editor/latest/toastui-editor-all.min.js"></script>
+</head>
+<body>
+
+  <header>
+    <div class="header-left">
+      <a href="/" class="header-back">&#8592;</a>
+      <div class="project-switcher" id="project-switcher">
+        <button class="project-switcher-trigger" id="project-switcher-btn">
+          <span class="header-title" id="project-title">Project</span>
+          <span class="project-switcher-caret" id="project-switcher-caret">&#x25BE;</span>
+        </button>
+        <div class="project-switcher-dropdown" id="project-switcher-dropdown" hidden></div>
+      </div>
+    </div>
+    <div class="header-right">
+      <span class="header-date" id="header-date"></span>
+      <a href="/editor.html?root=notebook" class="header-link" data-feature="notebook">Notebook</a>
+      <a href="/links.html" class="header-link">Links</a>
+    </div>
+  </header>
+
+  <script>
+    fetch('/api/workspace').then(r => r.json()).then(ws => {
+      const features = new Set(ws.features);
+      document.querySelectorAll('[data-feature]').forEach(el => {
+        if (!features.has(el.dataset.feature)) el.style.display = 'none';
+      });
+    });
+  </script>
+
+  <main class="project-layout">
+
+    <!-- Left sidebar: files + tasks stacked -->
+    <aside class="project-sidebar" id="project-sidebar">
+
+      <div class="proj-panel" id="files-panel">
+        <div class="proj-panel-header">
+          Files
+          <div style="display:flex;gap:3px;">
+            <button class="proj-panel-action" id="file-add-btn" title="New file">+</button>
+            <button class="proj-panel-action" id="folder-add-btn" title="New folder">⊕</button>
+          </div>
+        </div>
+        <nav class="proj-panel-body" id="file-nav"></nav>
+        <div class="proj-new-file" id="new-file-row" hidden>
+          <input class="proj-new-file-input" id="new-file-input" placeholder="filename" autocomplete="off" spellcheck="false" />
+        </div>
+        <div class="proj-new-file" id="new-folder-row" hidden>
+          <input class="proj-new-file-input" id="new-folder-input" placeholder="folder-name" autocomplete="off" spellcheck="false" />
+        </div>
+      </div>
+
+      <div class="proj-hresize" id="sidebar-hresize"></div>
+
+      <div class="proj-panel" id="tasks-panel">
+        <div class="proj-panel-header">Tasks</div>
+        <div class="proj-panel-body" id="tasks-body">
+          <p class="proj-empty">Loading…</p>
+        </div>
+        <div class="proj-task-create" id="task-create-row">
+          <input type="text" id="task-create-input" class="proj-task-create-input" placeholder="Add task…" />
+          <button class="proj-task-create-btn" id="task-create-btn">+</button>
+        </div>
+      </div>
+
+    </aside>
+
+    <!-- Vertical resize handle between sidebar and editor -->
+    <div class="proj-vresize" id="col-resize"></div>
+
+    <!-- Right: tabbed editor -->
+    <div class="project-editor">
+      <div class="editor-tabs" id="editor-tabs">
+        <span class="editor-tabs-empty" id="editor-tabs-empty">No file open</span>
+      </div>
+      <div class="editor-content" id="editor-content">
+        <div class="editor-empty-state" id="editor-empty">
+          <p>Select a file to view it.</p>
+        </div>
+      </div>
+    </div>
+
+  </main>
+
+  <script type="module">
+    import { initEditor, setupTuiPane, humanize } from './editor-core.js';
+
+    document.getElementById('header-date').textContent =
+      new Date().toLocaleDateString('en-GB', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+
+    const params      = new URLSearchParams(location.search);
+    const root        = params.get('root') || 'projects';
+    const projectPath = params.get('path') || '';
+    const initialFile = params.get('file') || null;
+
+    const titleSource = projectPath ? projectPath.split('/').pop() : root;
+    const pageTitle   = humanize(titleSource);
+    document.getElementById('project-title').textContent = pageTitle;
+    document.title = `${pageTitle} — Workspace`;
+
+    // ── Project switcher ──────────────────────────────────────────────────────
+    const switcherBtn      = document.getElementById('project-switcher-btn');
+    const switcherDropdown = document.getElementById('project-switcher-dropdown');
+    const switcherCaret    = document.getElementById('project-switcher-caret');
+
+    function closeSwitcher() {
+      switcherDropdown.hidden = true;
+      switcherCaret.classList.remove('open');
+    }
+
+    fetch('/api/projects')
+      .then(r => r.json())
+      .then(projects => {
+        const categories = {};
+        for (const p of projects) {
+          if (!categories[p.category]) categories[p.category] = [];
+          categories[p.category].push(p);
+        }
+
+        const toFolder    = p => p.replace(/\/[^/]+\.md$/i, '').replace(/\.md$/i, '');
+        const currentFolder = projectPath;
+
+        let html = '';
+        for (const [cat, items] of Object.entries(categories)) {
+          html += `<div class="psd-group-title">${cat}</div>`;
+          for (const p of items) {
+            const folder    = toFolder(p.path);
+            const isCurrent = folder === currentFolder;
+            const slug      = (p.status || '').toLowerCase().replace(/\s+/g, '-');
+            html +=
+              `<a class="psd-item${isCurrent ? ' current' : ''}" ` +
+              `href="/project.html?path=${encodeURIComponent(folder)}">` +
+              `<span class="status-dot status-${slug}"></span>` +
+              `<span>${p.name}</span>` +
+              `</a>`;
+          }
+        }
+        switcherDropdown.innerHTML = html;
+
+        switcherBtn.addEventListener('click', e => {
+          e.stopPropagation();
+          const isOpen = !switcherDropdown.hidden;
+          switcherDropdown.hidden = isOpen;
+          switcherCaret.classList.toggle('open', !isOpen);
+        });
+
+        document.addEventListener('click', closeSwitcher);
+        document.addEventListener('keydown', e => { if (e.key === 'Escape') closeSwitcher(); });
+      });
+
+    // ── README widget helpers ───────────────────────────────────────────────────
+    let readmeDoc      = null;
+    let sectionHtmlMap = {};
+
+    function esc(str) {
+      const d = document.createElement('div');
+      d.textContent = str ?? '';
+      return d.innerHTML;
+    }
+
+    function domain(url) {
+      try { return new URL(url).hostname; } catch { return url; }
+    }
+
+    const LINK_SECTIONS    = new Set(['Documentation', 'Links & Resources']);
+    const TODO_SECTION     = 'To-Do';
+    const STATUS_VALUES    = ['active', 'on hold', 'paused', 'backlog', 'done'];
+
+    function getReadmeStatus() {
+      for (const line of readmeDoc.headerLines) {
+        const m = line.match(/^\*\*Status:\*\*\s*(.+)/);
+        if (m) return m[1].trim();
+      }
+      return '';
+    }
+
+    function setReadmeStatus(newStatus) {
+      for (let i = 0; i < readmeDoc.headerLines.length; i++) {
+        if (readmeDoc.headerLines[i].match(/^\*\*Status:\*\*/)) {
+          readmeDoc.headerLines[i] = `**Status:** ${newStatus}`;
+          return;
+        }
+      }
+    }
+
+    function parseLinkSection(lines) {
+      const groups = [];
+      let cur = { heading: null, links: [] };
+      for (const raw of lines) {
+        const line = raw.trim();
+        const h3 = line.match(/^### (.+)/);
+        if (h3) {
+          if (cur.heading !== null || cur.links.length > 0) groups.push(cur);
+          cur = { heading: h3[1].trim(), links: [] };
+          continue;
+        }
+        const m = line.match(/^- \[([^\]]*)\]\(([^)]*)\)/);
+        if (m) cur.links.push({ label: m[1], url: m[2] });
+      }
+      groups.push(cur);
+      return groups;
+    }
+
+    function parseTodoSection(lines) {
+      const groups = [];
+      let cur = { name: null, items: [] };
+      for (const raw of lines) {
+        const h3 = raw.match(/^### (.+)/);
+        if (h3) { groups.push(cur); cur = { name: h3[1].trim(), items: [] }; continue; }
+        const item = raw.match(/^\s*- \[([ xX])\] (.+)/);
+        if (item) cur.items.push({ text: item[2].trim(), checked: item[1].toLowerCase() === 'x' });
+      }
+      groups.push(cur);
+      // always keep at least one group; drop empty unnamed ones only when others exist
+      return groups.length === 1 ? groups : groups.filter(g => g.name !== null || g.items.length > 0);
+    }
+
+    function parseReadme(markdown) {
+      const allLines = markdown.split('\n');
+      const headerLines = [];
+      let firstH2 = -1;
+      for (let i = 0; i < allLines.length; i++) {
+        if (allLines[i].match(/^## /)) { firstH2 = i; break; }
+        headerLines.push(allLines[i]);
+      }
+      if (firstH2 === -1) return { headerLines: allLines, sections: [] };
+
+      const sections = [];
+      let cur = null;
+      for (const line of allLines.slice(firstH2)) {
+        const h2 = line.match(/^## (.+)/);
+        if (h2) {
+          if (cur) sections.push(cur);
+          cur = { name: h2[1].trim(), lines: [] };
+        } else if (cur) {
+          cur.lines.push(line);
+        }
+      }
+      if (cur) sections.push(cur);
+
+      return {
+        headerLines,
+        sections: sections.map(s => {
+          if (LINK_SECTIONS.has(s.name)) return { type: 'links', name: s.name, groups: parseLinkSection(s.lines) };
+          if (s.name === TODO_SECTION)    return { type: 'todo',  name: s.name, groups: parseTodoSection(s.lines) };
+          return { type: 'prose', name: s.name, lines: s.lines };
+        }),
+      };
+    }
+
+    function extractSectionHtml(fullHtml) {
+      const doc = new DOMParser().parseFromString(fullHtml, 'text/html');
+      const map = {};
+      let cur = null;
+      let buf = [];
+      const flush = () => { if (cur) map[cur] = buf.map(n => n.outerHTML).join(''); };
+      for (const node of doc.body.children) {
+        if (node.tagName === 'H2') { flush(); cur = node.textContent.trim(); buf = []; }
+        else if (cur) buf.push(node);
+      }
+      flush();
+      return map;
+    }
+
+    function serializeReadme(doc) {
+      const parts = [doc.headerLines.join('\n')];
+      for (const s of doc.sections) {
+        parts.push(`\n## ${s.name}\n`);
+        if (s.type === 'prose') {
+          parts.push(s.lines.join('\n'));
+        } else if (s.type === 'todo') {
+          for (const g of s.groups) {
+            if (g.name !== null) parts.push(`\n### ${g.name}\n`);
+            if (g.items.length) parts.push('\n' + g.items.map(i => `- [${i.checked ? 'x' : ' '}] ${i.text}`).join('\n'));
+          }
+          parts.push('');
+        } else {
+          for (const g of s.groups) {
+            if (g.heading !== null) parts.push(`\n### ${g.heading}\n`);
+            if (g.links.length) parts.push('\n' + g.links.map(l => `- [${l.label}](${l.url})`).join('\n'));
+          }
+          parts.push('');
+        }
+      }
+      return parts.join('\n');
+    }
+
+    async function saveReadme() {
+      const fullPath = projectPath ? `${projectPath}/README.md` : 'README.md';
+      const r = await fetch('/api/project-file', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ root, path: fullPath, content: serializeReadme(readmeDoc) }),
+      });
+      return r.json();
+    }
+
+    function readmeLinkItemHTML(secName, gi, li, link) {
+      const s = esc(secName), g = gi, l = li;
+      return `<li class="links-item" data-sec="${s}" data-gi="${g}" data-li="${l}">` +
+        `<div class="links-item-main">` +
+        `<a class="links-link" href="${esc(link.url)}" target="_blank" rel="noopener noreferrer">${esc(link.label)}</a>` +
+        `<span class="links-url-hint">${esc(domain(link.url))}</span>` +
+        `</div>` +
+        `<div class="links-item-actions">` +
+        `<button class="links-action-btn" data-action="edit"   data-sec="${s}" data-gi="${g}" data-li="${l}">Edit</button>` +
+        `<button class="links-action-btn links-action-delete"  data-action="delete" data-sec="${s}" data-gi="${g}" data-li="${l}">×</button>` +
+        `</div></li>`;
+    }
+
+    function renderTodoWidget(sec, pane) {
+      const widget = document.createElement('div');
+      widget.className = 'readme-widget';
+      widget.innerHTML = `<div class="readme-widget-header">${esc(sec.name)}</div>`;
+      const body = document.createElement('div');
+      body.className = 'readme-todo-body';
+
+      sec.groups.forEach((group, gi) => {
+        if (group.name !== null) {
+          const headingEl = document.createElement('div');
+          headingEl.className = 'meeting-section-heading';
+          headingEl.innerHTML =
+            `<span class="heading-text">${esc(group.name)}</span>` +
+            `<span class="heading-controls">` +
+            `<button class="heading-delete-btn" data-gi="${gi}" title="Delete section">×</button>` +
+            `</span>`;
+          body.appendChild(headingEl);
+        }
+
+        group.items.forEach((item, ii) => {
+          const taskEl = document.createElement('div');
+          taskEl.className = 'meeting-task';
+          taskEl.innerHTML =
+            `<input type="checkbox" ${item.checked ? 'checked' : ''} data-gi="${gi}" data-ii="${ii}" />` +
+            `<span class="task-text">${esc(item.text)}</span>` +
+            `<span class="task-controls"><button class="item-delete-btn" data-gi="${gi}" data-ii="${ii}">×</button></span>`;
+          body.appendChild(taskEl);
+        });
+
+        const addRow = document.createElement('div');
+        addRow.className = 'add-item-row';
+        addRow.innerHTML =
+          `<button class="add-item-btn" data-gi="${gi}">+ Add item</button>` +
+          `<input class="add-item-input" placeholder="New item…" data-gi="${gi}" />`;
+        body.appendChild(addRow);
+      });
+
+      const addSecRow = document.createElement('div');
+      addSecRow.className = 'add-subsection-row';
+      addSecRow.innerHTML =
+        `<button class="add-subsection-btn">+ Add section</button>` +
+        `<input class="add-subsection-input" placeholder="Section name…" />`;
+      body.appendChild(addSecRow);
+
+      widget.appendChild(body);
+      bindTodoEvents(widget, sec, pane);
+      return widget;
+    }
+
+    function bindTodoEvents(widget, sec, pane) {
+      // Double-click task text to edit inline
+      widget.querySelectorAll('.task-text').forEach(span => {
+        span.addEventListener('dblclick', () => {
+          const taskEl = span.closest('.meeting-task');
+          const cb     = taskEl.querySelector('input[type="checkbox"]');
+          const gi = parseInt(cb.dataset.gi), ii = parseInt(cb.dataset.ii);
+          const current = span.textContent;
+          const input = document.createElement('input');
+          input.type = 'text'; input.value = current; input.className = 'inline-edit-input';
+          span.replaceWith(input); input.focus(); input.select();
+          let saved = false;
+          const save = async () => {
+            if (saved) return; saved = true;
+            const newText = input.value.trim();
+            if (newText && newText !== current) {
+              sec.groups[gi].items[ii].text = newText;
+              await saveReadme();
+            }
+            renderReadme(pane);
+          };
+          input.addEventListener('keydown', e => {
+            if (e.key === 'Enter')  { e.preventDefault(); save(); }
+            if (e.key === 'Escape') { saved = true; renderReadme(pane); }
+          });
+          input.addEventListener('blur', save);
+        });
+      });
+
+      // Toggle checkbox — no re-render needed, just save
+      widget.querySelectorAll('input[type="checkbox"]').forEach(cb => {
+        cb.addEventListener('change', () => {
+          sec.groups[parseInt(cb.dataset.gi)].items[parseInt(cb.dataset.ii)].checked = cb.checked;
+          saveReadme();
+        });
+      });
+
+      // Delete item
+      widget.querySelectorAll('.item-delete-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          sec.groups[parseInt(btn.dataset.gi)].items.splice(parseInt(btn.dataset.ii), 1);
+          saveReadme().then(() => renderReadme(pane));
+        });
+      });
+
+      // Delete section heading
+      widget.querySelectorAll('.heading-delete-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const g = sec.groups[parseInt(btn.dataset.gi)];
+          if (!confirm(`Delete section "${g.name}" and all its items?`)) return;
+          sec.groups.splice(parseInt(btn.dataset.gi), 1);
+          if (sec.groups.length === 0) sec.groups.push({ name: null, items: [] });
+          saveReadme().then(() => renderReadme(pane));
+        });
+      });
+
+      // Add item: show input
+      widget.querySelectorAll('.add-item-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          btn.style.display = 'none';
+          const input = btn.nextElementSibling;
+          input.style.display = 'block';
+          input.focus();
+        });
+      });
+
+      // Add item: commit on Enter / cancel on Escape / save on blur
+      widget.querySelectorAll('.add-item-input').forEach(input => {
+        let done = false;
+        const commit = async () => {
+          if (done) return; done = true;
+          const text = input.value.trim();
+          if (text) {
+            sec.groups[parseInt(input.dataset.gi)].items.push({ text, checked: false });
+            await saveReadme();
+          }
+          renderReadme(pane);
+        };
+        input.addEventListener('keydown', e => {
+          if (e.key === 'Enter')  { e.preventDefault(); commit(); }
+          if (e.key === 'Escape') { done = true; renderReadme(pane); }
+        });
+        input.addEventListener('blur', commit);
+      });
+
+      // Add section: show input
+      const addSecBtn   = widget.querySelector('.add-subsection-btn');
+      const addSecInput = widget.querySelector('.add-subsection-input');
+      addSecBtn.addEventListener('click', () => {
+        addSecBtn.style.display = 'none';
+        addSecInput.style.display = 'block';
+        addSecInput.focus();
+      });
+      let secDone = false;
+      const commitSection = async () => {
+        if (secDone) return; secDone = true;
+        const name = addSecInput.value.trim();
+        if (name) {
+          sec.groups.push({ name, items: [] });
+          await saveReadme();
+        }
+        renderReadme(pane);
+      };
+      addSecInput.addEventListener('keydown', e => {
+        if (e.key === 'Enter')  { e.preventDefault(); commitSection(); }
+        if (e.key === 'Escape') { secDone = true; renderReadme(pane); }
+      });
+      addSecInput.addEventListener('blur', commitSection);
+    }
+
+    function renderReadme(pane) {
+      pane.innerHTML = '';
+
+      const layout  = document.createElement('div');
+      layout.className = 'readme-layout';
+      const leftCol  = document.createElement('div');
+      leftCol.className = 'readme-col';
+      const rightCol = document.createElement('div');
+      rightCol.className = 'readme-col';
+
+      // Left: all non-link sections in document order
+      for (const sec of readmeDoc.sections) {
+        if (sec.type === 'links') continue;
+        let widget;
+        if (sec.type === 'todo') {
+          widget = renderTodoWidget(sec, pane);
+        } else {
+          widget = document.createElement('div');
+          widget.className = 'readme-widget';
+          widget.innerHTML =
+            `<div class="readme-widget-header">${esc(sec.name)}` +
+            `<button class="readme-edit-btn">Edit</button></div>`;
+
+          const proseBody = document.createElement('div');
+          proseBody.className = 'readme-widget-body prose';
+          proseBody.innerHTML = sectionHtmlMap[sec.name] || `<p class="proj-empty">—</p>`;
+          widget.appendChild(proseBody);
+
+          const editArea = document.createElement('div');
+          editArea.className = 'readme-prose-edit';
+          editArea.hidden = true;
+          editArea.innerHTML =
+            `<textarea class="readme-prose-textarea"></textarea>` +
+            `<div class="readme-prose-actions">` +
+            `<button class="link-save-btn">Save</button>` +
+            `<button class="link-cancel-btn">Cancel</button>` +
+            `</div>`;
+          widget.appendChild(editArea);
+
+          widget.querySelector('.readme-edit-btn').addEventListener('click', () => {
+            proseBody.hidden = true;
+            editArea.hidden = false;
+            editArea.querySelector('textarea').value = sec.lines.join('\n').trim();
+            editArea.querySelector('textarea').focus();
+          });
+
+          editArea.querySelector('.link-save-btn').addEventListener('click', async () => {
+            const newText = editArea.querySelector('textarea').value;
+            sec.lines = newText ? newText.split('\n') : [''];
+            await saveReadme();
+            const mdPath = projectPath ? `${projectPath}/README.md` : 'README.md';
+            const refreshed = await fetch(`/api/md?root=${encodeURIComponent(root)}&path=${encodeURIComponent(mdPath)}`).then(r => r.json());
+            sectionHtmlMap = extractSectionHtml(refreshed.html);
+            renderReadme(pane);
+          });
+
+          editArea.querySelector('.link-cancel-btn').addEventListener('click', () => {
+            proseBody.hidden = false;
+            editArea.hidden = true;
+          });
+        }
+        leftCol.appendChild(widget);
+      }
+
+      // Right: Status widget
+      const currentStatus = getReadmeStatus();
+      const statusWidget  = document.createElement('div');
+      statusWidget.className = 'readme-widget';
+      statusWidget.innerHTML =
+        `<div class="readme-widget-header">Status</div>` +
+        `<div class="readme-widget-body readme-status-body">` +
+        `<div class="readme-status-display">` +
+        `<span class="status-dot status-${currentStatus.replace(/\s+/g, '-')}"></span>` +
+        `<span class="readme-status-label">${esc(currentStatus) || '—'}</span>` +
+        `<span class="readme-status-hint">click to change</span>` +
+        `</div></div>`;
+
+      statusWidget.querySelector('.readme-status-display').addEventListener('click', () => {
+        const body = statusWidget.querySelector('.readme-status-body');
+        body.innerHTML =
+          `<select class="readme-status-select">` +
+          STATUS_VALUES.map(s =>
+            `<option value="${s}"${s === currentStatus ? ' selected' : ''}>${s}</option>`
+          ).join('') +
+          `</select>`;
+        const sel = body.querySelector('select');
+        sel.focus();
+        sel.addEventListener('change', async () => {
+          setReadmeStatus(sel.value);
+          await saveReadme();
+          renderReadme(pane);
+        });
+        sel.addEventListener('blur', () => renderReadme(pane));
+      });
+
+      rightCol.appendChild(statusWidget);
+
+      // Right: Documentation and Links & Resources
+      for (const sec of readmeDoc.sections) {
+        if (sec.type !== 'links') continue;
+        const widget = document.createElement('div');
+        widget.className = 'readme-widget';
+        widget.innerHTML = `<div class="readme-widget-header">${esc(sec.name)}</div>`;
+
+        sec.groups.forEach((group, gi) => {
+          const groupEl = document.createElement('div');
+          groupEl.className = 'readme-link-group';
+          groupEl.innerHTML =
+            (group.heading ? `<div class="readme-link-group-title">${esc(group.heading)}</div>` : '') +
+            `<ul class="links-list">` +
+            group.links.map((link, li) => readmeLinkItemHTML(sec.name, gi, li, link)).join('') +
+            `</ul>` +
+            `<div class="links-add-area">` +
+            `<button class="add-link-trigger" data-sec="${esc(sec.name)}" data-gi="${gi}">+ Add link</button>` +
+            `<form class="add-link-form" data-sec="${esc(sec.name)}" data-gi="${gi}">` +
+            `<input class="link-input" name="label" placeholder="Label" autocomplete="off" />` +
+            `<input class="link-input link-input-url" name="url" placeholder="https://…" autocomplete="off" />` +
+            `<div class="link-form-actions">` +
+            `<button type="submit" class="link-save-btn">Save</button>` +
+            `<button type="button" class="link-cancel-btn">Cancel</button>` +
+            `</div></form></div>`;
+          widget.appendChild(groupEl);
+        });
+        rightCol.appendChild(widget);
+      }
+
+      layout.appendChild(leftCol);
+      layout.appendChild(rightCol);
+      pane.appendChild(layout);
+      bindReadmeEvents(pane);
+    }
+
+    function bindReadmeEvents(pane) {
+      function getGroup(el) {
+        const sec = readmeDoc.sections.find(s => s.name === el.dataset.sec);
+        return sec ? sec.groups[parseInt(el.dataset.gi)] : null;
+      }
+
+      pane.querySelectorAll('[data-action="delete"]').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const group = getGroup(btn);
+          if (!group) return;
+          group.links.splice(parseInt(btn.dataset.li), 1);
+          saveReadme().then(() => renderReadme(pane));
+        });
+      });
+
+      pane.querySelectorAll('[data-action="edit"]').forEach(btn => {
+        btn.addEventListener('click', () => startEditReadmeLink(pane, btn));
+      });
+
+      pane.querySelectorAll('.add-link-trigger').forEach(trigger => {
+        trigger.addEventListener('click', () => {
+          trigger.style.display = 'none';
+          const form = trigger.nextElementSibling;
+          form.classList.add('open');
+          form.querySelector('[name="label"]').focus();
+        });
+      });
+
+      pane.querySelectorAll('.add-link-form').forEach(form => {
+        form.addEventListener('submit', async e => {
+          e.preventDefault();
+          const label = form.querySelector('[name="label"]').value.trim();
+          const url   = form.querySelector('[name="url"]').value.trim();
+          if (!label || !url) return;
+          const group = getGroup(form);
+          if (!group) return;
+          group.links.push({ label, url });
+          await saveReadme();
+          renderReadme(pane);
+        });
+        form.querySelector('.link-cancel-btn').addEventListener('click', () => renderReadme(pane));
+      });
+    }
+
+    function startEditReadmeLink(pane, btn) {
+      const sec   = readmeDoc.sections.find(s => s.name === btn.dataset.sec);
+      const group = sec?.groups[parseInt(btn.dataset.gi)];
+      if (!group) return;
+      const link = group.links[parseInt(btn.dataset.li)];
+      const item = btn.closest('.links-item');
+      item.innerHTML =
+        `<form class="link-edit-form">` +
+        `<input class="link-input" name="label" value="${esc(link.label)}" autocomplete="off" />` +
+        `<input class="link-input link-input-url" name="url" value="${esc(link.url)}" autocomplete="off" />` +
+        `<div class="link-form-actions">` +
+        `<button type="submit" class="link-save-btn">Save</button>` +
+        `<button type="button" class="link-cancel-btn">Cancel</button>` +
+        `</div></form>`;
+      const form = item.querySelector('form');
+      form.querySelector('[name="label"]').focus();
+      form.addEventListener('submit', async e => {
+        e.preventDefault();
+        const newLabel = form.querySelector('[name="label"]').value.trim();
+        const newUrl   = form.querySelector('[name="url"]').value.trim();
+        if (!newLabel || !newUrl) return;
+        group.links[parseInt(btn.dataset.li)] = { label: newLabel, url: newUrl };
+        await saveReadme();
+        renderReadme(pane);
+      });
+      form.querySelector('.link-cancel-btn').addEventListener('click', () => renderReadme(pane));
+    }
+
+    initEditor({
+      root, projectPath, initialFile,
+      sidebarEl:      document.getElementById('project-sidebar'),
+      navEl:          document.getElementById('file-nav'),
+      tabsEl:         document.getElementById('editor-tabs'),
+      contentEl:      document.getElementById('editor-content'),
+      emptyEl:        document.getElementById('editor-empty'),
+      tabsEmptyEl:    document.getElementById('editor-tabs-empty'),
+      fileAddBtn:     document.getElementById('file-add-btn'),
+      newFileRow:     document.getElementById('new-file-row'),
+      newFileInput:   document.getElementById('new-file-input'),
+      folderAddBtn:   document.getElementById('folder-add-btn'),
+      newFolderRow:   document.getElementById('new-folder-row'),
+      newFolderInput: document.getElementById('new-folder-input'),
+      vResizeHandle:  document.getElementById('col-resize'),
+      hResizeHandle:  document.getElementById('sidebar-hresize'),
+      hResizePanel:   document.getElementById('files-panel'),
+      onOpenPane(relPath, data, tab, pane, isPermanent) {
+        if (isPermanent) {
+          pane.classList.add('readme-view');
+          readmeDoc      = parseReadme(data.markdown);
+          sectionHtmlMap = extractSectionHtml(data.html);
+          renderReadme(pane);
+          const npLine = readmeDoc.headerLines.find(l => /^\*\*Notion Project:\*\*/.test(l));
+          const notionProject = npLine ? npLine.replace(/^\*\*Notion Project:\*\*\s*/, '').trim() : null;
+          loadProjectTasks(notionProject);
+        } else {
+          setupTuiPane(pane, tab, {
+            markdown: data.markdown,
+            root,
+            savePath: projectPath ? `${projectPath}/${relPath}` : relPath,
+          });
+        }
+      },
+      autoOpenReadme: true,
+    });
+
+    // ── Tasks ───────────────────────────────────────────────────────────────────
+    const TASK_STATUSES = ['This Week', 'Today', 'In progress', 'Done'];
+    let currentNotionProject = null;
+
+    function renderTaskItem(t) {
+      const slug = (t.status ?? '').toLowerCase().replace(/\s+/g, '-');
+      return `<div class="proj-task-item" data-id="${esc(t.id)}">` +
+        `<a class="proj-task-title" href="${esc(t.url)}" target="_blank" rel="noopener">${esc(t.title)}</a>` +
+        `<div class="proj-task-row">` +
+        `<span class="proj-task-status proj-task-status--${slug}">${esc(t.status ?? '')}</span>` +
+        `<div class="proj-task-status-wrap">` +
+        `<button class="proj-task-status-trigger" title="Change status" data-id="${esc(t.id)}">⋯</button>` +
+        `<div class="proj-task-status-menu">` +
+        TASK_STATUSES.map(s =>
+          `<button class="proj-task-status-option${s === t.status ? ' active' : ''}" data-status="${esc(s)}" data-id="${esc(t.id)}">${esc(s)}</button>`
+        ).join('') +
+        `</div></div>` +
+        `</div>` +
+        `</div>`;
+    }
+
+    function loadProjectTasks(notionProject) {
+      currentNotionProject = notionProject;
+      const url = notionProject
+        ? `/api/tasks?project=${encodeURIComponent(notionProject)}`
+        : '/api/tasks';
+      const body = document.getElementById('tasks-body');
+      body.innerHTML = '<p class="proj-empty">Loading…</p>';
+      fetch(url)
+        .then(r => r.json())
+        .then(data => {
+          if (!data.connected) {
+            body.innerHTML = '<p class="proj-empty">Tasks unavailable</p>';
+            return;
+          }
+          const all = [...(data.today ?? []), ...(data.backlog ?? [])];
+          if (all.length === 0) {
+            body.innerHTML = '<p class="proj-empty">No open tasks</p>';
+            return;
+          }
+          body.innerHTML = all.map(renderTaskItem).join('');
+        })
+        .catch(() => {
+          body.innerHTML = '<p class="proj-empty">Tasks unavailable</p>';
+        });
+    }
+
+    // Status dropdown toggle
+    document.getElementById('tasks-body').addEventListener('click', async e => {
+      const triggerBtn = e.target.closest('.proj-task-status-trigger');
+      const optionBtn  = e.target.closest('.proj-task-status-option');
+
+      if (optionBtn) {
+        const { id, status } = optionBtn.dataset;
+        const menu = optionBtn.closest('.proj-task-status-menu');
+        menu.classList.remove('open');
+        const res = await fetch(`/api/tasks/${encodeURIComponent(id)}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ status }),
+        });
+        if (res.ok) loadProjectTasks(currentNotionProject);
+        return;
+      }
+
+      if (triggerBtn) {
+        e.stopPropagation();
+        const menu = triggerBtn.nextElementSibling;
+        const isOpen = menu.classList.contains('open');
+        document.querySelectorAll('.proj-task-status-menu.open').forEach(m => m.classList.remove('open'));
+        if (!isOpen) menu.classList.add('open');
+        return;
+      }
+    });
+
+    document.addEventListener('click', () => {
+      document.querySelectorAll('.proj-task-status-menu.open').forEach(m => m.classList.remove('open'));
+    });
+
+    // Create task
+    async function createTask() {
+      const input = document.getElementById('task-create-input');
+      const title = input.value.trim();
+      if (!title) return;
+      input.disabled = true;
+      const res = await fetch('/api/tasks', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title, project: currentNotionProject }),
+      });
+      input.disabled = false;
+      if (res.ok) {
+        input.value = '';
+        loadProjectTasks(currentNotionProject);
+      }
+    }
+
+    document.getElementById('task-create-btn').addEventListener('click', createTask);
+    document.getElementById('task-create-input').addEventListener('keydown', e => {
+      if (e.key === 'Enter') createTask();
+    });
+  </script>
+</body>
+</html>

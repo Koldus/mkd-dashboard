@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Editor — Workspace</title>
+  <link rel="stylesheet" href="https://uicdn.toast.com/editor/latest/toastui-editor.min.css" />
+  <link rel="stylesheet" href="https://uicdn.toast.com/editor/latest/toastui-editor-dark.min.css" />
+  <link rel="stylesheet" href="style.css" />
+  <script src="https://uicdn.toast.com/editor/latest/toastui-editor-all.min.js"></script>
+</head>
+<body>
+
+  <header>
+    <div class="header-left">
+      <a href="/" class="header-back">&#8592;</a>
+      <span class="header-title" id="page-title">Notebook</span>
+    </div>
+    <div class="header-right">
+      <span class="header-date" id="header-date"></span>
+      <a href="/editor.html?root=notebook" class="header-link" data-feature="notebook">Notebook</a>
+      <a href="/links.html" class="header-link">Links</a>
+    </div>
+  </header>
+
+  <script>
+    fetch('/api/workspace').then(r => r.json()).then(ws => {
+      const features = new Set(ws.features);
+      document.querySelectorAll('[data-feature]').forEach(el => {
+        if (!features.has(el.dataset.feature)) el.style.display = 'none';
+      });
+    });
+  </script>
+
+  <main class="project-layout">
+
+    <aside class="project-sidebar" id="project-sidebar">
+      <div class="proj-panel" id="files-panel">
+        <div class="proj-panel-header">
+          Files
+          <div style="display:flex;gap:3px;">
+            <button class="proj-panel-action" id="file-add-btn" title="New file">+</button>
+            <button class="proj-panel-action" id="folder-add-btn" title="New folder">⊕</button>
+          </div>
+        </div>
+        <nav class="proj-panel-body" id="file-nav"></nav>
+        <div class="proj-new-file" id="new-file-row" hidden>
+          <input class="proj-new-file-input" id="new-file-input" placeholder="filename" autocomplete="off" spellcheck="false" />
+        </div>
+        <div class="proj-new-file" id="new-folder-row" hidden>
+          <input class="proj-new-file-input" id="new-folder-input" placeholder="folder-name" autocomplete="off" spellcheck="false" />
+        </div>
+      </div>
+    </aside>
+
+    <div class="proj-vresize" id="col-resize"></div>
+
+    <div class="project-editor">
+      <div class="editor-tabs" id="editor-tabs">
+        <span class="editor-tabs-empty" id="editor-tabs-empty">No file open</span>
+      </div>
+      <div class="editor-content" id="editor-content">
+        <div class="editor-empty-state" id="editor-empty">
+          <p>Select a file to view it.</p>
+        </div>
+      </div>
+    </div>
+
+  </main>
+
+  <script type="module">
+    import { initEditor, setupTuiPane, humanize } from './editor-core.js';
+
+    document.getElementById('header-date').textContent =
+      new Date().toLocaleDateString('en-GB', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+
+    const params      = new URLSearchParams(location.search);
+    const root        = params.get('root') || 'notebook';
+    const projectPath = params.get('path') || '';
+    const initialFile = params.get('file') || null;
+
+    const titleSource = projectPath ? projectPath.split('/').pop() : root;
+    const pageTitle   = humanize(titleSource);
+    document.getElementById('page-title').textContent = pageTitle;
+    document.title = `${pageTitle} — Workspace`;
+
+    initEditor({
+      root, projectPath, initialFile,
+      sidebarEl:      document.getElementById('project-sidebar'),
+      navEl:          document.getElementById('file-nav'),
+      tabsEl:         document.getElementById('editor-tabs'),
+      contentEl:      document.getElementById('editor-content'),
+      emptyEl:        document.getElementById('editor-empty'),
+      tabsEmptyEl:    document.getElementById('editor-tabs-empty'),
+      fileAddBtn:     document.getElementById('file-add-btn'),
+      newFileRow:     document.getElementById('new-file-row'),
+      newFileInput:   document.getElementById('new-file-input'),
+      folderAddBtn:   document.getElementById('folder-add-btn'),
+      newFolderRow:   document.getElementById('new-folder-row'),
+      newFolderInput: document.getElementById('new-folder-input'),
+      vResizeHandle:  document.getElementById('col-resize'),
+      onOpenPane(relPath, data, tab, pane) {
+        setupTuiPane(pane, tab, {
+          markdown: data.markdown,
+          root,
+          savePath: projectPath ? `${projectPath}/${relPath}` : relPath,
+        });
+      },
+    });
+  </script>
+
+</body>
+</html>

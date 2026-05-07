@@ -1,0 +1,454 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Workspace</title>
+  <link rel="stylesheet" href="style.css" />
+  <script src="quotes.js"></script>
+  <script src="resize.js" defer></script>
+</head>
+<body>
+
+  <header>
+    <span class="header-title">Workspace</span>
+    <div class="header-right">
+      <span class="header-date" id="header-date"></span>
+      <a href="/editor.html?root=notebook" class="header-link" data-feature="notebook">Notebook</a>
+      <a href="/links.html" class="header-link">Links</a>
+    </div>
+  </header>
+
+  <main class="split-layout has-footer">
+
+    <div class="col-left">
+      <!-- LEFT TOP: Today -->
+      <section class="panel" id="panel-today">
+        <h2 class="panel-title">
+          <span>Today</span>
+          <div class="task-filters">
+            <label class="toggle-label" id="agent-tasks-label">
+              <input type="checkbox" id="agent-tasks-toggle" />
+              <span>agent tasks</span>
+            </label>
+            <select id="project-filter" class="task-filter-select">
+              <option value="">all projects</option>
+            </select>
+          </div>
+        </h2>
+        <div class="panel-content" id="today-content">
+          <div class="tasks-placeholder">
+            <p class="placeholder-msg">Notion not connected</p>
+            <p class="placeholder-hint">Add <code>NOTION_API_KEY</code> to <code>.env</code> to enable live tasks.</p>
+          </div>
+        </div>
+      </section>
+      <!-- LEFT BOTTOM: Backlog -->
+      <section class="panel" id="panel-backlog">
+        <h2 class="panel-title">Backlog</h2>
+        <div class="panel-content" id="backlog-content">
+          <div class="tasks-placeholder">
+            <p class="placeholder-msg">Notion not connected</p>
+            <p class="placeholder-hint">Add <code>NOTION_API_KEY</code> to <code>.env</code> to enable live tasks.</p>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <div class="resize-handle"></div>
+
+    <div class="col-right">
+      <!-- RIGHT: Tabbed panel (full height) -->
+      <section class="panel" id="panel-right">
+        <div class="panel-title">
+          <nav class="tab-nav">
+            <button class="tab-btn active" data-tab="projects">Projects</button>
+            <button class="tab-btn" data-tab="meetings" data-feature="meetings">Meetings</button>
+          </nav>
+          <div style="display:flex;align-items:center;gap:8px;">
+            <label class="toggle-label" id="show-all-label">
+              <input type="checkbox" id="show-all-toggle" />
+              <span>show all</span>
+            </label>
+            <button class="icon-btn" id="new-project-btn" title="New project">+</button>
+          </div>
+        </div>
+        <div class="panel-content" id="section-content"></div>
+      </section>
+    </div>
+
+  </main>
+
+  <footer id="quote-footer">
+    <span id="quote-text"></span>
+    <span id="quote-attr"></span>
+  </footer>
+
+  <!-- New project modal -->
+  <div class="modal-overlay" id="new-project-overlay">
+    <div class="modal">
+      <div class="modal-title">New Project</div>
+      <div class="modal-body">
+        <label class="modal-field">
+          <span class="modal-label">Name</span>
+          <input type="text" id="new-project-name" class="modal-input" placeholder="My Project" />
+        </label>
+        <label class="modal-field">
+          <span class="modal-label">Group</span>
+          <select id="new-project-group" class="modal-input">
+          </select>
+        </label>
+      </div>
+      <div class="modal-actions">
+        <button class="modal-btn" id="new-project-cancel">Cancel</button>
+        <button class="modal-btn modal-btn-primary" id="new-project-submit">Create</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    document.getElementById('header-date').textContent =
+      new Date().toLocaleDateString('en-GB', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+
+    // ── Workspace config ──────────────────────────────────────────────────────
+    let workspaceFeatures = new Set();
+
+    function applyWorkspaceConfig(ws) {
+      workspaceFeatures = new Set(ws.features);
+
+      // Hide nav links and tabs for inactive features
+      document.querySelectorAll('[data-feature]').forEach(el => {
+        if (!workspaceFeatures.has(el.dataset.feature)) {
+          el.style.display = 'none';
+        }
+      });
+
+      // Populate project group dropdown from workspace config
+      const sel = document.getElementById('new-project-group');
+      sel.innerHTML = ws.projectGroups.map((g, i) => {
+        const label = g.sub ? `${g.section.replace('## ', '')} · ${g.sub.replace('### ', '')}` : g.section.replace('## ', '');
+        return `<option value="${g.prefix}"${i === 0 ? ' selected' : ''}>${label}</option>`;
+      }).join('');
+    }
+
+    fetch('/api/workspace').then(r => r.json()).then(applyWorkspaceConfig);
+
+    // ── Projects tab ──────────────────────────────────────────────────────────
+    let allProjects = [];
+    const ACTIVE_STATUSES = new Set(['active']);
+
+    function humanize(str) {
+      return str.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+    }
+
+    const ALL_STATUSES = ['active', 'on hold', 'paused', 'backlog', 'done'];
+
+    function renderProjects(showAll) {
+      const container = document.getElementById('section-content');
+      const visible = showAll ? allProjects : allProjects.filter(p => ACTIVE_STATUSES.has(p.status));
+
+      if (visible.length === 0) {
+        container.innerHTML = '<p class="empty">No projects to show.</p>';
+        return;
+      }
+
+      const groups = {};
+      for (const p of visible) {
+        if (!groups[p.category]) groups[p.category] = [];
+        groups[p.category].push(p);
+      }
+
+      container.innerHTML = Object.entries(groups).map(([cat, items]) => `
+        <div class="project-group">
+          <div class="project-group-title">${cat}</div>
+          <ul class="project-list">
+            ${items.map(p => {
+              const folder = p.path.replace(/\/[^/]+\.md$/, '');
+              const options = ALL_STATUSES.filter(s => s !== p.status)
+                .map(s => `<button class="move-option" data-path="${p.path}" data-status="${s}">${s}</button>`)
+                .join('');
+              return `<li class="project-item">
+                <span class="status-dot status-${p.status.replace(/\s+/g, '-')}"></span>
+                <a class="project-name" href="/project.html?path=${encodeURIComponent(folder)}">${p.name}</a>
+                <div class="project-move">
+                  <span class="move-trigger project-status">${p.status}</span>
+                  <div class="move-menu">${options}</div>
+                </div>
+              </li>`;
+            }).join('')}
+          </ul>
+        </div>
+      `).join('');
+    }
+
+    // ── Meetings tab ──────────────────────────────────────────────────────────
+    function renderMeetings() {
+      const container = document.getElementById('section-content');
+      container.innerHTML = '<p class="empty">Loading…</p>';
+
+      fetch('/api/meetings')
+        .then(r => r.json())
+        .then(data => {
+          const groups = Object.entries(data).filter(([, items]) => items.length > 0);
+          if (!groups.length) {
+            container.innerHTML = '<p class="empty">No meetings found.</p>';
+            return;
+          }
+          container.innerHTML = groups.map(([category, items]) => `
+            <div class="project-group">
+              <div class="project-group-title">${category}</div>
+              <ul class="project-list">
+                ${items.map(m => `
+                  <li class="project-item">
+                    <a class="project-name" href="/meeting.html?path=${encodeURIComponent(m.path)}">${m.name}</a>
+                  </li>`).join('')}
+              </ul>
+            </div>
+          `).join('');
+        });
+    }
+
+    // ── Tab switching ─────────────────────────────────────────────────────────
+    let activeTab = 'projects';
+
+    function switchTab(tab) {
+      activeTab = tab;
+      document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
+      document.getElementById('show-all-label').style.display = tab === 'projects' ? 'flex' : 'none';
+      document.getElementById('new-project-btn').style.display = tab === 'projects' ? 'inline-flex' : 'none';
+
+      if (tab === 'projects') {
+        renderProjects(document.getElementById('show-all-toggle').checked);
+      } else if (tab === 'meetings') {
+        renderMeetings();
+      }
+    }
+
+    document.querySelectorAll('.tab-btn').forEach(btn => {
+      btn.addEventListener('click', () => switchTab(btn.dataset.tab));
+    });
+
+    document.getElementById('show-all-toggle').addEventListener('change', e => {
+      if (activeTab === 'projects') renderProjects(e.target.checked);
+    });
+
+    // Initial load
+    fetch('/api/projects')
+      .then(r => r.json())
+      .then(data => {
+        allProjects = data;
+        switchTab('projects');
+      });
+
+    // ── Tasks ─────────────────────────────────────────────────────────────────
+    const TODAY_STATUS_ORDER   = ['In progress', 'Not started', 'Today'];
+    const BACKLOG_STATUS_ORDER = ['This Week', 'Backlog'];
+
+    function slugify(str) {
+      return (str ?? '').toLowerCase().replace(/\s+/g, '-');
+    }
+
+    function renderGroupedTasks(containerId, tasks, statusOrder) {
+      const el = document.getElementById(containerId);
+      if (!tasks.length) {
+        el.innerHTML = '<p class="empty">No tasks</p>';
+        return;
+      }
+
+      const grouped = {};
+      for (const t of tasks) {
+        const s = t.status ?? 'Unknown';
+        if (!grouped[s]) grouped[s] = [];
+        grouped[s].push(t);
+      }
+
+      const order = [...statusOrder, ...Object.keys(grouped).filter(s => !statusOrder.includes(s))];
+
+      el.innerHTML = order
+        .filter(s => grouped[s]?.length)
+        .map(s => `
+          <div class="task-section">
+            <div class="task-section-heading">${s}</div>
+            ${grouped[s].map(t => `
+              <div class="task-item task-status-${slugify(t.status)}">
+                <span class="task-title">${t.title}</span>
+                <div class="task-badges">
+                  ${t.project ? `<span class="task-badge">${t.project}</span>` : ''}
+                  ${t.jobType ? `<span class="task-badge task-badge-job">${t.jobType}</span>` : ''}
+                </div>
+              </div>
+            `).join('')}
+          </div>
+        `).join('');
+    }
+
+    let tasksData = null;
+
+    function applyFilters(tasks) {
+      let result = tasks;
+      if (document.getElementById('agent-tasks-toggle').checked)
+        result = result.filter(t => t.jobType === 'Night - automated');
+      const project = document.getElementById('project-filter').value;
+      if (project)
+        result = result.filter(t => t.project === project);
+      return result;
+    }
+
+    function rerenderTasks() {
+      if (!tasksData) return;
+      renderGroupedTasks('today-content',   applyFilters(tasksData.today),   TODAY_STATUS_ORDER);
+      renderGroupedTasks('backlog-content', applyFilters(tasksData.backlog), BACKLOG_STATUS_ORDER);
+    }
+
+    function populateProjectFilter(today, backlog) {
+      const projects = [...new Set([...today, ...backlog].map(t => t.project).filter(Boolean))].sort();
+      const sel = document.getElementById('project-filter');
+      sel.innerHTML = '<option value="">all projects</option>' +
+        projects.map(p => `<option value="${p}">${p}</option>`).join('');
+    }
+
+    document.getElementById('agent-tasks-toggle').addEventListener('change', rerenderTasks);
+    document.getElementById('project-filter').addEventListener('change', rerenderTasks);
+
+    fetch('/api/tasks')
+      .then(r => r.json())
+      .then(data => {
+        console.log('[tasks]', data);
+        if (!data.connected) {
+          if (data.error) {
+            document.querySelectorAll('.placeholder-msg').forEach(el => el.textContent = 'Notion error');
+            document.querySelectorAll('.placeholder-hint').forEach(el => el.textContent = data.error);
+          }
+          return;
+        }
+        tasksData = data;
+        populateProjectFilter(data.today, data.backlog);
+        rerenderTasks();
+      })
+      .catch(err => console.error('[tasks] fetch failed:', err));
+
+    // ── Move-to (status change) ───────────────────────────────────────────────
+    const sectionContent = document.getElementById('section-content');
+
+    sectionContent.addEventListener('click', e => {
+      const trigger = e.target.closest('.move-trigger');
+      const option  = e.target.closest('.move-option');
+
+      if (trigger) {
+        e.stopPropagation();
+        const menu = trigger.nextElementSibling;
+        const isOpen = menu.classList.contains('open');
+        document.querySelectorAll('.move-menu.open').forEach(m => m.classList.remove('open'));
+        if (!isOpen) menu.classList.add('open');
+        return;
+      }
+
+      if (option) {
+        e.stopPropagation();
+        const { path, status } = option.dataset;
+        fetch('/api/project-status', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ path, status }),
+        })
+          .then(r => r.json())
+          .then(data => {
+            if (!data.ok) throw new Error(data.error);
+            const proj = allProjects.find(p => p.path === path);
+            if (proj) proj.status = status;
+            renderProjects(document.getElementById('show-all-toggle').checked);
+          })
+          .catch(err => alert(`Error: ${err.message}`));
+        return;
+      }
+    });
+
+    document.addEventListener('click', () => {
+      document.querySelectorAll('.move-menu.open').forEach(m => m.classList.remove('open'));
+    });
+
+    // ── New project modal ─────────────────────────────────────────────────────
+    const overlay     = document.getElementById('new-project-overlay');
+    const nameInput   = document.getElementById('new-project-name');
+    const groupSelect = document.getElementById('new-project-group');
+
+    function toKebab(str) {
+      return str.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+    }
+
+    function openNewProjectModal() {
+      nameInput.value = '';
+      overlay.classList.add('open');
+      nameInput.focus();
+    }
+
+    function closeNewProjectModal() {
+      overlay.classList.remove('open');
+    }
+
+    document.getElementById('new-project-btn').addEventListener('click', openNewProjectModal);
+    document.getElementById('new-project-cancel').addEventListener('click', closeNewProjectModal);
+    overlay.addEventListener('click', e => { if (e.target === overlay) closeNewProjectModal(); });
+
+    document.getElementById('new-project-submit').addEventListener('click', async () => {
+      const name = nameInput.value.trim();
+      if (!name) { nameInput.focus(); return; }
+
+      const folder   = toKebab(name);
+      const prefix   = groupSelect.value;
+      const relPath  = `${prefix}${folder}/README.md`;
+      const submitBtn = document.getElementById('new-project-submit');
+
+      submitBtn.disabled = true;
+      submitBtn.textContent = 'Creating…';
+
+      try {
+        const res = await fetch('/api/project-file', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ root: 'projects', path: relPath, name }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Failed');
+
+        closeNewProjectModal();
+        // Reload projects list
+        const projects = await fetch('/api/projects').then(r => r.json());
+        allProjects = projects;
+        renderProjects(document.getElementById('show-all-toggle').checked);
+      } catch (err) {
+        alert(`Error: ${err.message}`);
+      } finally {
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'Create';
+      }
+    });
+
+    nameInput.addEventListener('keydown', e => {
+      if (e.key === 'Enter') document.getElementById('new-project-submit').click();
+      if (e.key === 'Escape') closeNewProjectModal();
+    });
+
+    // ── Quote footer ──────────────────────────────────────────────────────────
+    let quoteIndex = Math.floor(Math.random() * QUOTES.length);
+
+    function showQuote(q) {
+      document.getElementById('quote-text').textContent = q.text;
+      const attr = document.getElementById('quote-attr');
+      attr.textContent = q.author ? '— ' + q.author : '';
+    }
+
+    showQuote(QUOTES[quoteIndex]);
+
+    setInterval(() => {
+      const footer = document.getElementById('quote-footer');
+      footer.classList.add('fade-out');
+      setTimeout(() => {
+        quoteIndex = (quoteIndex + 1) % QUOTES.length;
+        showQuote(QUOTES[quoteIndex]);
+        footer.classList.remove('fade-out');
+      }, 500);
+    }, 5 * 60 * 1000);
+  </script>
+</body>
+</html>

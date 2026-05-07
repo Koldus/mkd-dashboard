@@ -1,0 +1,18 @@
+{
+  "workspaces": [
+    {
+      "id": "work",
+      "name": "Working Station",
+      "path": "/path/to/mkd-working-station",
+      "notionDatabaseId": "",
+      "features": ["projects", "meetings", "notebook"]
+    },
+    {
+      "id": "home",
+      "name": "Home Station",
+      "path": "/path/to/mkd-home-station",
+      "notionDatabaseId": "",
+      "features": ["projects", "notebook"]
+    }
+  ]
+}
