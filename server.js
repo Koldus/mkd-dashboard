@@ -703,3 +703,4 @@ app.put('/api/tasks/:id', async (req, res) => {
 
 app.listen(PORT, () => {
   console.log(`Dashboard running at http://localhost:${PORT}`);
+});
