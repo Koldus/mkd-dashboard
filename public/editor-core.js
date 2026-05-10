@@ -3,6 +3,29 @@
 // Consumed by project.html (projects) and editor.html (notebook, ideas, …).
 // ─────────────────────────────────────────────────────────────────────────────
 
+import { Editor }    from 'https://esm.sh/@tiptap/core@2'
+import StarterKit    from 'https://esm.sh/@tiptap/starter-kit@2'
+import Image         from 'https://esm.sh/@tiptap/extension-image@2'
+import Link          from 'https://esm.sh/@tiptap/extension-link@2'
+import TaskList      from 'https://esm.sh/@tiptap/extension-task-list@2'
+import TaskItem      from 'https://esm.sh/@tiptap/extension-task-item@2'
+import Table         from 'https://esm.sh/@tiptap/extension-table@2'
+import TableRow      from 'https://esm.sh/@tiptap/extension-table-row@2'
+import TableHeader   from 'https://esm.sh/@tiptap/extension-table-header@2'
+import TableCell     from 'https://esm.sh/@tiptap/extension-table-cell@2'
+import { Markdown }  from 'https://esm.sh/tiptap-markdown@0.8'
+
+// Image node extended with width + height attributes
+const CustomImage = Image.extend({
+  addAttributes() {
+    return {
+      ...this.parent?.(),
+      width:  { default: null, parseHTML: el => el.getAttribute('width'),  renderHTML: a => a.width  ? { width:  a.width  } : {} },
+      height: { default: null, parseHTML: el => el.getAttribute('height'), renderHTML: a => a.height ? { height: a.height } : {} },
+    };
+  },
+});
+
 // ── SVG icon constants ────────────────────────────────────────────────────────
 const FILE_ICON   = `<svg class="nav-tree-icon nav-tree-icon--file" width="10" height="12" viewBox="0 0 10 12" fill="none"><path d="M1 2h6l2 2v7H1z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><path d="M7 2v2h2" stroke="currentColor" stroke-width="1.2"/></svg>`;
 const FOLDER_ICON = `<svg class="nav-tree-icon nav-tree-icon--folder" width="13" height="10" viewBox="0 0 13 10" fill="none"><path d="M0.5 2.5h4l1-1.5h7v8h-12z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" fill="currentColor" fill-opacity="0.12"/></svg>`;
@@ -16,43 +39,134 @@ export function labelForFile(relPath) {
   return humanize(relPath.split('/').pop().replace('.md', ''));
 }
 
-// ── Toast UI pane setup ───────────────────────────────────────────────────────
+// ── Image path helpers ────────────────────────────────────────────────────────
+// Relative image paths are rewritten to /files/:root/... before being fed to
+// the editor so WYSIWYG can load them. Reverted to relative paths on save.
+function imgBaseUrl(root, savePath) {
+  const lastSlash = savePath.lastIndexOf('/');
+  const dir = lastSlash >= 0 ? savePath.slice(0, lastSlash) : '';
+  return `/files/${root}/${dir ? dir + '/' : ''}`;
+}
+
+function resolveImages(md, baseUrl) {
+  // markdown syntax: ![alt](relative)
+  let r = md.replace(/!\[([^\]]*)\]\((?!https?:\/\/|\/|data:)([^)\s]+)\)/g,
+    (_, alt, src) => `![${alt}](${baseUrl}${src})`);
+  // HTML img tags: <img ... src="relative" ...>
+  r = r.replace(/<img\b([^>]*?)src="(?!https?:\/\/|\/|data:)([^"]+)"/gi,
+    (_, pre, src) => `<img${pre}src="${baseUrl}${src}"`);
+  return r;
+}
+
+function unresolveImages(md, baseUrl) {
+  const esc = baseUrl.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  // markdown syntax
+  let r = md.replace(new RegExp(`!\\[([^\\]]*)\\]\\(${esc}([^)\\s]+)\\)`, 'g'),
+    (_, alt, src) => `![${alt}](${src})`);
+  // HTML img tags
+  r = r.replace(new RegExp(`<img\\b([^>]*?)src="${esc}([^"]+)"`, 'gi'),
+    (_, pre, src) => `<img${pre}src="${src}"`);
+  return r;
+}
+
+// ── TipTap pane setup ─────────────────────────────────────────────────────────
 export function setupTuiPane(pane, tab, { markdown, root, savePath }) {
   pane.classList.add('editor-pane-editable');
   pane.innerHTML = '';
 
+  // ── Save bar ──────────────────────────────────────────────────────────────
   const saveBar = document.createElement('div');
   saveBar.className = 'editor-save-bar';
   saveBar.innerHTML =
     `<span class="editor-save-status">All changes saved</span>` +
     `<button class="editor-save-btn" disabled>Save</button>`;
 
-  const tuiWrap = document.createElement('div');
-  tuiWrap.className = 'tui-wrap';
+  // ── Layout ────────────────────────────────────────────────────────────────
+  const bodyWrap = document.createElement('div');
+  bodyWrap.className = 'editor-body-wrap';
 
-  pane.appendChild(saveBar);
-  pane.appendChild(tuiWrap);
+  const tipWrap = document.createElement('div');
+  tipWrap.className = 'tiptap-wrap';
 
-  /* global toastui */
-  const editor = new toastui.Editor({
-    el: tuiWrap,
-    initialEditType: 'wysiwyg',
-    height: '100%',
-    initialValue: '',
-    theme: 'dark',
-    hideModeSwitch: true,
-    toolbarItems: [
-      ['heading', 'bold', 'italic', 'strike'],
-      ['hr', 'quote'],
-      ['ul', 'ol', 'task', 'indent', 'outdent'],
-      ['table', 'link'],
-      ['code', 'codeblock'],
+  // Toolbar
+  const toolbar = document.createElement('div');
+  toolbar.className = 'tiptap-toolbar';
+  toolbar.innerHTML =
+    `<button class="tt-btn" data-cmd="h1">H1</button>` +
+    `<button class="tt-btn" data-cmd="h2">H2</button>` +
+    `<button class="tt-btn" data-cmd="h3">H3</button>` +
+    `<span class="tt-sep"></span>` +
+    `<button class="tt-btn tt-bold" data-cmd="bold" title="Bold">B</button>` +
+    `<button class="tt-btn tt-italic" data-cmd="italic" title="Italic">I</button>` +
+    `<button class="tt-btn tt-strike" data-cmd="strike" title="Strike">S</button>` +
+    `<span class="tt-sep"></span>` +
+    `<button class="tt-btn" data-cmd="code" title="Inline code">\`</button>` +
+    `<button class="tt-btn" data-cmd="codeBlock" title="Code block">&lt;/&gt;</button>` +
+    `<button class="tt-btn" data-cmd="blockquote" title="Blockquote">❝</button>` +
+    `<span class="tt-sep"></span>` +
+    `<button class="tt-btn" data-cmd="ul" title="Bullet list">• –</button>` +
+    `<button class="tt-btn" data-cmd="ol" title="Ordered list">1.</button>` +
+    `<button class="tt-btn" data-cmd="task" title="Task list">☐</button>` +
+    `<span class="tt-sep"></span>` +
+    `<button class="tt-btn" data-cmd="hr" title="Horizontal rule">—</button>` +
+    `<button class="tt-btn" data-cmd="link" title="Insert link">⊕ link</button>` +
+    `<button class="tt-btn" data-cmd="image" title="Insert image">⊕ img</button>` +
+    `<span class="tt-sep tt-sep-flex"></span>` +
+    `<button class="tt-btn" data-cmd="source" title="Toggle markdown source">MD</button>`;
+
+  // Image insert form (inline, below toolbar)
+  const imgForm = document.createElement('div');
+  imgForm.className = 'tiptap-img-form';
+  imgForm.hidden = true;
+  imgForm.innerHTML =
+    `<input class="tt-input" id="tt-src" placeholder="filename.png" autocomplete="off" />` +
+    `<input class="tt-input tt-input-sm" id="tt-width" placeholder="width px" type="number" />` +
+    `<input class="tt-input" id="tt-alt" placeholder="alt text" autocomplete="off" />` +
+    `<button class="tt-btn tt-btn-primary" id="tt-img-ok">Insert</button>` +
+    `<button class="tt-btn" id="tt-img-cancel">✕</button>`;
+
+  // Editor content area
+  const contentEl = document.createElement('div');
+  contentEl.className = 'tiptap-content';
+
+  // Source textarea
+  const sourceEl = document.createElement('textarea');
+  sourceEl.className = 'tiptap-source';
+  sourceEl.hidden = true;
+  sourceEl.spellcheck = false;
+
+  tipWrap.append(toolbar, imgForm, contentEl, sourceEl);
+
+  // ToC sidebar
+  const tocEl = document.createElement('nav');
+  tocEl.className = 'editor-toc';
+  tocEl.style.display = 'none';
+
+  bodyWrap.append(tipWrap, tocEl);
+  pane.append(saveBar, bodyWrap);
+
+  // ── TipTap editor ─────────────────────────────────────────────────────────
+  const baseUrl = imgBaseUrl(root, savePath);
+
+  const editor = new Editor({
+    element: contentEl,
+    extensions: [
+      StarterKit,
+      CustomImage,
+      Link.configure({ openOnClick: false }),
+      TaskList,
+      TaskItem.configure({ nested: true }),
+      Table.configure({ resizable: false }),
+      TableRow, TableHeader, TableCell,
+      Markdown.configure({ html: true, tightLists: true }),
     ],
+    content: resolveImages(markdown || '', baseUrl),
+    editorProps: { attributes: { spellcheck: 'false' } },
   });
 
-  editor.setMarkdown(markdown || '');
-  pane._tuiEditor = editor;
+  pane._editor = editor;
 
+  // ── Save / dirty ──────────────────────────────────────────────────────────
   const statusEl = saveBar.querySelector('.editor-save-status');
   const saveBtn  = saveBar.querySelector('.editor-save-btn');
   let dirty = false;
@@ -66,11 +180,34 @@ export function setupTuiPane(pane, tab, { markdown, root, savePath }) {
     tab.classList.add('tab-dirty');
   }
 
+  // tiptap-markdown serializes images as ![alt](src), losing width/height.
+  // Walk the doc and replace markdown img syntax with <img> HTML for any node
+  // that carries width or height so the attributes survive the save round-trip.
+  function getMarkdown() {
+    let md = editor.storage.markdown.getMarkdown();
+    editor.state.doc.descendants(node => {
+      if (node.type.name !== 'image') return;
+      const { src, alt, width, height } = node.attrs;
+      if (!width && !height) return;
+      const escapedSrc = src.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const parts = [`src="${src}"`];
+      if (alt)    parts.push(`alt="${alt}"`);
+      if (width)  parts.push(`width="${width}"`);
+      if (height) parts.push(`height="${height}"`);
+      md = md.replace(
+        new RegExp(`!\\[[^\\]]*\\]\\(${escapedSrc}[^)]*\\)`, 'g'),
+        `<img ${parts.join(' ')} />`
+      );
+    });
+    return md;
+  }
+
   function save() {
+    const md = unresolveImages(inSourceMode ? sourceEl.value : getMarkdown(), baseUrl);
     fetch('/api/project-file', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ root, path: savePath, content: editor.getMarkdown() }),
+      body: JSON.stringify({ root, path: savePath, content: md }),
     }).then(r => r.json()).then(d => {
       if (d.error) { alert(d.error); return; }
       dirty = false;
@@ -81,11 +218,176 @@ export function setupTuiPane(pane, tab, { markdown, root, savePath }) {
     });
   }
 
-  setTimeout(() => editor.on('change', markDirty), 0);
   saveBtn.addEventListener('click', save);
   pane.addEventListener('keydown', e => {
     if ((e.ctrlKey || e.metaKey) && e.key === 's') { e.preventDefault(); if (dirty) save(); }
   });
+
+  // ── Toolbar ───────────────────────────────────────────────────────────────
+  function updateToolbar() {
+    const state = {
+      h1: editor.isActive('heading', { level: 1 }),
+      h2: editor.isActive('heading', { level: 2 }),
+      h3: editor.isActive('heading', { level: 3 }),
+      bold: editor.isActive('bold'), italic: editor.isActive('italic'),
+      strike: editor.isActive('strike'), code: editor.isActive('code'),
+      codeBlock: editor.isActive('codeBlock'), blockquote: editor.isActive('blockquote'),
+      ul: editor.isActive('bulletList'), ol: editor.isActive('orderedList'),
+      task: editor.isActive('taskList'),
+    };
+    toolbar.querySelectorAll('[data-cmd]').forEach(b =>
+      b.classList.toggle('active', !!state[b.dataset.cmd])
+    );
+  }
+
+  toolbar.addEventListener('mousedown', e => {
+    const btn = e.target.closest('[data-cmd]');
+    if (!btn) return;
+    e.preventDefault();
+    const c = editor.chain().focus();
+    switch (btn.dataset.cmd) {
+      case 'h1':         c.toggleHeading({ level: 1 }).run(); break;
+      case 'h2':         c.toggleHeading({ level: 2 }).run(); break;
+      case 'h3':         c.toggleHeading({ level: 3 }).run(); break;
+      case 'bold':       c.toggleBold().run(); break;
+      case 'italic':     c.toggleItalic().run(); break;
+      case 'strike':     c.toggleStrike().run(); break;
+      case 'code':       c.toggleCode().run(); break;
+      case 'codeBlock':  c.toggleCodeBlock().run(); break;
+      case 'blockquote': c.toggleBlockquote().run(); break;
+      case 'ul':         c.toggleBulletList().run(); break;
+      case 'ol':         c.toggleOrderedList().run(); break;
+      case 'task':       c.toggleTaskList().run(); break;
+      case 'hr':         c.setHorizontalRule().run(); break;
+      case 'link':       handleLink(); break;
+      case 'image':      toggleImgForm(); break;
+      case 'source':     toggleSource(); break;
+    }
+    updateToolbar();
+  });
+
+  editor.on('selectionUpdate', () => { updateToolbar(); updateLinkTooltip(); });
+  editor.on('update', () => { markDirty(); updateToc(); updateToolbar(); updateLinkTooltip(); });
+  sourceEl.addEventListener('input', markDirty);
+
+  // ── Image insert ──────────────────────────────────────────────────────────
+  function toggleImgForm() {
+    imgForm.hidden = !imgForm.hidden;
+    if (!imgForm.hidden) imgForm.querySelector('#tt-src').focus();
+  }
+
+  function insertImage() {
+    const src   = imgForm.querySelector('#tt-src').value.trim();
+    const width = imgForm.querySelector('#tt-width').value.trim();
+    const alt   = imgForm.querySelector('#tt-alt').value.trim();
+    if (!src) return;
+    editor.chain().focus().setImage({
+      src: baseUrl + src, alt: alt || undefined,
+      ...(width ? { width } : {}),
+    }).run();
+    imgForm.hidden = true;
+    ['#tt-src', '#tt-width', '#tt-alt'].forEach(sel => { imgForm.querySelector(sel).value = ''; });
+  }
+
+  imgForm.querySelector('#tt-img-ok').addEventListener('click', insertImage);
+  imgForm.querySelector('#tt-img-cancel').addEventListener('click', () => { imgForm.hidden = true; });
+  imgForm.querySelector('#tt-src').addEventListener('keydown', e => { if (e.key === 'Enter') insertImage(); });
+
+  // ── Link tooltip ──────────────────────────────────────────────────────────
+  const linkTooltip = document.createElement('div');
+  linkTooltip.className = 'tt-link-tooltip';
+  linkTooltip.hidden = true;
+  document.body.appendChild(linkTooltip);
+  editor.on('destroy', () => linkTooltip.remove());
+
+  function updateLinkTooltip() {
+    if (!editor.isActive('link')) { linkTooltip.hidden = true; return; }
+    const href = editor.getAttributes('link').href || '';
+    const { from } = editor.state.selection;
+    const coords = editor.view.coordsAtPos(from);
+    const display = href.length > 55 ? href.slice(0, 52) + '…' : href;
+    linkTooltip.innerHTML =
+      `<span class="tt-link-url" title="${href}">${display}</span>` +
+      `<button class="tt-btn" data-action="open">↗ open</button>` +
+      `<button class="tt-btn" data-action="edit">edit</button>` +
+      `<button class="tt-btn" data-action="remove">✕</button>`;
+    linkTooltip.hidden = false;
+    linkTooltip.style.left = coords.left + 'px';
+    linkTooltip.style.top  = (coords.bottom + 6) + 'px';
+  }
+
+  linkTooltip.addEventListener('mousedown', e => {
+    e.preventDefault();
+    const btn = e.target.closest('[data-action]');
+    if (!btn) return;
+    const href = editor.getAttributes('link').href;
+    if (btn.dataset.action === 'open') {
+      window.open(href, '_blank', 'noopener');
+    } else if (btn.dataset.action === 'edit') {
+      const url = prompt('URL:', href);
+      if (url !== null) {
+        if (url === '') editor.chain().focus().unsetLink().run();
+        else editor.chain().focus().setLink({ href: url }).run();
+      }
+    } else if (btn.dataset.action === 'remove') {
+      editor.chain().focus().unsetLink().run();
+    }
+    updateLinkTooltip();
+  });
+
+  // ── Link insert (toolbar button) ──────────────────────────────────────────
+  function handleLink() {
+    const prev = editor.getAttributes('link').href ?? '';
+    const url = prompt('URL:', prev);
+    if (url === null) return;
+    if (url === '') { editor.chain().focus().unsetLink().run(); return; }
+    editor.chain().focus().setLink({ href: url }).run();
+  }
+
+  // ── Source mode ───────────────────────────────────────────────────────────
+  let inSourceMode = false;
+  const sourceBtn = toolbar.querySelector('[data-cmd="source"]');
+
+  function toggleSource() {
+    inSourceMode = !inSourceMode;
+    if (inSourceMode) {
+      sourceEl.value = unresolveImages(getMarkdown(), baseUrl);
+      contentEl.hidden = true; sourceEl.hidden = false;
+      sourceBtn.classList.add('active');
+      sourceEl.focus();
+    } else {
+      editor.commands.setContent(resolveImages(sourceEl.value, baseUrl));
+      sourceEl.hidden = true; contentEl.hidden = false;
+      sourceBtn.classList.remove('active');
+      editor.commands.focus();
+    }
+  }
+
+  // ── Table of Contents ─────────────────────────────────────────────────────
+  function escH(str) {
+    const d = document.createElement('div'); d.textContent = str; return d.innerHTML;
+  }
+
+  function updateToc() {
+    const els = [...contentEl.querySelectorAll('h2,h3,h4,h5,h6')];
+    if (els.length === 0) { tocEl.style.display = 'none'; return; }
+    tocEl.style.display = 'flex';
+    tocEl.innerHTML = els.map((h, i) => {
+      const lv = parseInt(h.tagName[1]);
+      return `<a class="toc-item toc-level-${lv}" style="padding-left:${(lv-2)*12+10}px" data-i="${i}">${escH(h.textContent)}</a>`;
+    }).join('');
+    tocEl.querySelectorAll('.toc-item').forEach((a, i) => {
+      a.addEventListener('click', () => {
+        // Direct scrollIntoView works because tiptap-content is our own scroll container
+        const scrollEl = contentEl;
+        const target   = els[i];
+        const top = target.getBoundingClientRect().top - scrollEl.getBoundingClientRect().top + scrollEl.scrollTop;
+        scrollEl.scrollTo({ top: top - 16, behavior: 'smooth' });
+      });
+    });
+  }
+
+  updateToc();
 }
 
 // ── Tree builders (private) ───────────────────────────────────────────────────
@@ -118,7 +420,8 @@ function buildTree(files) {
 
 function fileRowHtml(f) {
   return `<div class="file-row" draggable="true" data-file="${f}">` +
-    `<button class="checklist-nav-btn file-nav-btn" data-file="${f}">${FILE_ICON}${labelForFile(f)}</button>` +
+    `<button class="checklist-nav-btn file-nav-btn" data-file="${f}">${FILE_ICON}<span class="file-label">${labelForFile(f)}</span></button>` +
+    `<button class="file-row-rename" data-file="${f}" title="Rename">✎</button>` +
     `<button class="file-row-delete" data-file="${f}" title="Delete">&#x2715;</button>` +
     `</div>`;
 }
@@ -203,10 +506,6 @@ export function initEditor({
     navEl.querySelectorAll('.file-nav-btn').forEach(b =>
       b.classList.toggle('active', b.dataset.file === relPath)
     );
-    const t = openTabs.find(t => t.relPath === relPath);
-    if (t?.paneEl._tuiEditor) {
-      requestAnimationFrame(() => t.paneEl._tuiEditor.setHeight('100%'));
-    }
   }
 
   function closeTab(relPath) {
@@ -298,6 +597,63 @@ export function initEditor({
     });
   }
 
+  function startInlineRename(relPath, renameBtn) {
+    const row      = renameBtn.closest('.file-row');
+    const navBtn   = row.querySelector('.file-nav-btn');
+    const labelEl  = navBtn.querySelector('.file-label');
+    const baseName = relPath.split('/').pop().replace(/\.md$/, '');
+
+    const input = document.createElement('input');
+    input.className = 'file-rename-input';
+    input.value = baseName;
+    labelEl.replaceWith(input);
+    navBtn.style.pointerEvents = 'none';
+    renameBtn.hidden = true;
+    input.focus();
+    input.select();
+
+    let done = false;
+
+    function cancel() {
+      if (done) return; done = true;
+      input.replaceWith(labelEl);
+      navBtn.style.pointerEvents = '';
+      renameBtn.hidden = false;
+    }
+
+    function commit() {
+      if (done) return; done = true;
+      const newBase = input.value.trim();
+      if (!newBase || newBase === baseName) { done = false; cancel(); return; }
+      const dir        = relPath.includes('/') ? relPath.slice(0, relPath.lastIndexOf('/') + 1) : '';
+      const newRelPath = dir + newBase + '.md';
+      const fromFull   = projectPath ? `${projectPath}/${relPath}` : relPath;
+      const toFull     = projectPath ? `${projectPath}/${newRelPath}` : newRelPath;
+      const openTab    = openTabs.find(t => t.relPath === relPath);
+      if (openTab?.tabEl.classList.contains('tab-dirty')) {
+        if (!confirm('This file has unsaved changes. Rename anyway? Changes will be lost.')) {
+          done = false; cancel(); return;
+        }
+      }
+      fetch('/api/project-file/move', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ root, from: fromFull, to: toFull }),
+      }).then(r => r.json()).then(d => {
+        if (d.error) { alert(d.error); done = false; cancel(); return; }
+        const wasActive = openTab?.tabEl.classList.contains('active');
+        if (openTab) closeTab(relPath);
+        reloadNav().then(() => { if (wasActive || openTab) openFile(newRelPath); });
+      });
+    }
+
+    input.addEventListener('keydown', e => {
+      if (e.key === 'Enter')  { e.preventDefault(); commit(); }
+      if (e.key === 'Escape') { e.preventDefault(); cancel(); }
+    });
+    input.addEventListener('blur', cancel);
+  }
+
   function moveFile(relPath, targetFolder) {
     const filename   = relPath.split('/').pop();
     const newRelPath = targetFolder ? `${targetFolder}/${filename}` : filename;
@@ -320,6 +676,9 @@ export function initEditor({
   function bindNavEvents(nav) {
     nav.querySelectorAll('.file-nav-btn').forEach(btn =>
       btn.addEventListener('click', () => openFile(btn.dataset.file))
+    );
+    nav.querySelectorAll('.file-row-rename').forEach(btn =>
+      btn.addEventListener('click', e => { e.stopPropagation(); startInlineRename(btn.dataset.file, btn); })
     );
     nav.querySelectorAll('.file-row-delete').forEach(btn =>
       btn.addEventListener('click', e => { e.stopPropagation(); deleteFile(btn.dataset.file); })

@@ -5,14 +5,19 @@
       "name": "Working Station",
       "path": "/path/to/mkd-working-station",
       "notionDatabaseId": "",
-      "features": ["projects", "meetings", "notebook"]
+      "features": ["projects", "meetings", "notebook", "f1"],
+      "activityTypes": ["Organization", "Learning", "Meeting"],
+      "customRoots": {
+        "f1": "/path/to/gd-design-studio/projects/F1"
+      }
     },
     {
       "id": "home",
       "name": "Home Station",
       "path": "/path/to/mkd-home-station",
       "notionDatabaseId": "",
-      "features": ["projects", "notebook"]
+      "features": ["projects", "notebook"],
+      "activityTypes": ["Organization", "Reading", "Learning"]
     }
   ]
 }

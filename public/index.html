@@ -28,10 +28,14 @@
         <h2 class="panel-title">
           <span>Today</span>
           <div class="task-filters">
+            <button class="icon-btn" id="task-new-btn" title="New task">+</button>
             <label class="toggle-label" id="agent-tasks-label">
               <input type="checkbox" id="agent-tasks-toggle" />
               <span>agent tasks</span>
             </label>
+            <select id="activity-filter" class="task-filter-select">
+              <option value="">all tasks</option>
+            </select>
             <select id="project-filter" class="task-filter-select">
               <option value="">all projects</option>
             </select>
@@ -69,7 +73,7 @@
           </nav>
           <div style="display:flex;align-items:center;gap:8px;">
             <label class="toggle-label" id="show-all-label">
-              <input type="checkbox" id="show-all-toggle" />
+              <input type="checkbox" id="show-all-toggle" checked />
               <span>show all</span>
             </label>
             <button class="icon-btn" id="new-project-btn" title="New project">+</button>
@@ -108,12 +112,63 @@
     </div>
   </div>
 
+  <!-- Task modal -->
+  <div class="modal-overlay" id="task-modal-overlay">
+    <div class="modal">
+      <div class="modal-title" id="task-modal-title">New Task</div>
+      <div class="modal-body">
+        <label class="modal-field">
+          <span class="modal-label">Task</span>
+          <input type="text" id="task-modal-name" class="modal-input" placeholder="Task name" autocomplete="off" />
+        </label>
+        <label class="modal-field">
+          <span class="modal-label">Status</span>
+          <select id="task-modal-status" class="modal-input">
+            <option>Backlog</option>
+            <option>Plan soon</option>
+            <option>This Week</option>
+            <option>Today</option>
+            <option>In progress</option>
+            <option>On Hold</option>
+          </select>
+        </label>
+        <label class="modal-field">
+          <span class="modal-label">Project</span>
+          <input type="text" id="task-modal-project" class="modal-input" list="task-project-options" autocomplete="off" />
+          <datalist id="task-project-options"></datalist>
+        </label>
+        <label class="modal-field">
+          <span class="modal-label">Job Type</span>
+          <select id="task-modal-jobtype" class="modal-input">
+            <option value="">—</option>
+            <option>Day - manual</option>
+            <option>Night - automated</option>
+          </select>
+        </label>
+        <div class="modal-field">
+          <span class="modal-label">Activity</span>
+          <div class="modal-pills" id="task-modal-activity"></div>
+        </div>
+        <label class="modal-field">
+          <span class="modal-label">Folder</span>
+          <input type="text" id="task-modal-folder" class="modal-input" list="task-folder-options" autocomplete="off" placeholder="optional" />
+          <datalist id="task-folder-options"></datalist>
+        </label>
+      </div>
+      <div class="modal-actions">
+        <button class="modal-btn" id="task-modal-cancel">Cancel</button>
+        <button class="modal-btn modal-btn-primary" id="task-modal-submit">Save</button>
+      </div>
+    </div>
+  </div>
+
   <script>
     document.getElementById('header-date').textContent =
       new Date().toLocaleDateString('en-GB', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
 
     // ── Workspace config ──────────────────────────────────────────────────────
     let workspaceFeatures = new Set();
+    let wsActivityTypes = [];
 
     function applyWorkspaceConfig(ws) {
       workspaceFeatures = new Set(ws.features);
@@ -127,15 +182,22 @@
         }
       });
 
-      // Populate project group dropdown from workspace config
-      const sel = document.getElementById('new-project-group');
-      sel.innerHTML = ws.projectGroups.map((g, i) => {
-        const label = g.sub ? `${g.section.replace('## ', '')} · ${g.sub.replace('### ', '')}` : g.section.replace('## ', '');
-        return `<option value="${g.prefix}"${i === 0 ? ' selected' : ''}>${label}</option>`;
-      }).join('');
     }
 
-    fetch('/api/workspace').then(r => r.json()).then(applyWorkspaceConfig);
+    fetch('/api/workspace').then(r => r.json()).then(ws => {
+      applyWorkspaceConfig(ws);
+      wsActivityTypes = ws.activityTypes || [];
+      const actSel = document.getElementById('activity-filter');
+      actSel.innerHTML = '<option value="">all tasks</option>' +
+        wsActivityTypes.map(a => `<option value="${a}">${a}</option>`).join('');
+    });
+
+    fetch('/api/project-groups').then(r => r.json()).then(groups => {
+      const sel = document.getElementById('new-project-group');
+      sel.innerHTML = groups.map((g, i) =>
+        `<option value="${g.prefix}"${i === 0 ? ' selected' : ''}>${g.label}</option>`
+      ).join('');
+    });
 
     // ── Projects tab ──────────────────────────────────────────────────────────
     let allProjects = [];
@@ -321,11 +383,12 @@
           <div class="task-section">
             <div class="task-section-heading">${s}</div>
             ${grouped[s].map(t => `
-              <div class="task-item task-status-${slugify(t.status)}">
+              <div class="task-item task-status-${slugify(t.status)}" data-id="${t.id}">
                 <span class="task-title">${t.title}</span>
                 <div class="task-badges">
                   ${t.project ? `<span class="task-badge">${t.project}</span>` : ''}
                   ${t.jobType ? `<span class="task-badge task-badge-job">${t.jobType}</span>` : ''}
+                  <button class="task-edit-btn" data-id="${t.id}" title="Edit">✎</button>
                 </div>
               </div>
             `).join('')}
@@ -334,11 +397,15 @@
     }
 
     let tasksData = null;
+    let taskById  = {};
 
     function applyFilters(tasks) {
       let result = tasks;
       if (document.getElementById('agent-tasks-toggle').checked)
         result = result.filter(t => t.jobType === 'Night - automated');
+      const activity = document.getElementById('activity-filter').value;
+      if (activity)
+        result = result.filter(t => Array.isArray(t.activity) && t.activity.includes(activity));
       const project = document.getElementById('project-filter').value;
       if (project)
         result = result.filter(t => t.project === project);
@@ -359,6 +426,7 @@
     }
 
     document.getElementById('agent-tasks-toggle').addEventListener('change', rerenderTasks);
+    document.getElementById('activity-filter').addEventListener('change', rerenderTasks);
     document.getElementById('project-filter').addEventListener('change', rerenderTasks);
 
     fetch('/api/tasks')
@@ -373,6 +441,14 @@
           return;
         }
         tasksData = data;
+        const allTasks = [...(data.today ?? []), ...(data.backlog ?? [])];
+        taskById = Object.fromEntries(allTasks.map(t => [t.id, t]));
+        const projects = [...new Set(allTasks.map(t => t.project).filter(Boolean))];
+        document.getElementById('task-project-options').innerHTML =
+          projects.map(p => `<option value="${p}"></option>`).join('');
+        const folders = [...new Set(allTasks.map(t => t.folder).filter(Boolean))];
+        document.getElementById('task-folder-options').innerHTML =
+          folders.map(f => `<option value="${f}"></option>`).join('');
         populateProjectFilter(data.today, data.backlog);
         rerenderTasks();
       })
@@ -478,6 +554,86 @@
     nameInput.addEventListener('keydown', e => {
       if (e.key === 'Enter') document.getElementById('new-project-submit').click();
       if (e.key === 'Escape') closeNewProjectModal();
+    });
+
+    // ── Task modal ────────────────────────────────────────────────────────────
+    let editingTaskId = null;
+
+    function buildTaskActivityPills(selected = []) {
+      document.getElementById('task-modal-activity').innerHTML = wsActivityTypes.map(a =>
+        `<label class="pill-toggle">` +
+        `<input type="checkbox" value="${a}"${selected.includes(a) ? ' checked' : ''} />` +
+        `<span>${a}</span></label>`
+      ).join('');
+    }
+
+    function openTaskModal(taskId = null) {
+      editingTaskId = taskId;
+      const t = taskId ? taskById[taskId] : null;
+      document.getElementById('task-modal-title').textContent = t ? 'Edit Task' : 'New Task';
+      document.getElementById('task-modal-name').value    = t ? t.title : '';
+      document.getElementById('task-modal-status').value  = t ? (t.status ?? 'Backlog') : 'Backlog';
+      document.getElementById('task-modal-project').value = t ? (t.project ?? '') : '';
+      document.getElementById('task-modal-jobtype').value = t ? (t.jobType ?? '') : '';
+      document.getElementById('task-modal-folder').value  = t ? (t.folder ?? '') : '';
+      buildTaskActivityPills(t ? (t.activity ?? []) : []);
+      document.getElementById('task-modal-overlay').classList.add('open');
+      document.getElementById('task-modal-name').focus();
+    }
+
+    function closeTaskModal() {
+      document.getElementById('task-modal-overlay').classList.remove('open');
+      editingTaskId = null;
+    }
+
+    document.getElementById('task-new-btn').addEventListener('click', () => openTaskModal());
+    document.getElementById('task-modal-cancel').addEventListener('click', closeTaskModal);
+    document.getElementById('task-modal-overlay').addEventListener('click', e => {
+      if (e.target === document.getElementById('task-modal-overlay')) closeTaskModal();
+    });
+
+    document.addEventListener('click', e => {
+      const btn = e.target.closest('.task-edit-btn');
+      if (btn) openTaskModal(btn.dataset.id);
+    });
+
+    document.getElementById('task-modal-submit').addEventListener('click', async () => {
+      const name    = document.getElementById('task-modal-name').value.trim();
+      if (!name) { document.getElementById('task-modal-name').focus(); return; }
+      const status  = document.getElementById('task-modal-status').value;
+      const project = document.getElementById('task-modal-project').value.trim() || null;
+      const jobType = document.getElementById('task-modal-jobtype').value || null;
+      const folder  = document.getElementById('task-modal-folder').value.trim() || null;
+      const activity = [...document.querySelectorAll('#task-modal-activity input:checked')].map(el => el.value);
+
+      const btn = document.getElementById('task-modal-submit');
+      btn.disabled = true; btn.textContent = 'Saving…';
+      try {
+        if (editingTaskId) {
+          await fetch(`/api/tasks/${encodeURIComponent(editingTaskId)}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ title: name, status, project, jobType, activity, folder }),
+          });
+        } else {
+          await fetch('/api/tasks', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ title: name, status, project, jobType, activity, folder }),
+          });
+        }
+        closeTaskModal();
+        const data = await fetch('/api/tasks').then(r => r.json());
+        if (data.connected) {
+          tasksData = data;
+          const allTasks = [...(data.today ?? []), ...(data.backlog ?? [])];
+          taskById = Object.fromEntries(allTasks.map(t => [t.id, t]));
+          populateProjectFilter(data.today, data.backlog);
+          rerenderTasks();
+        }
+      } finally {
+        btn.disabled = false; btn.textContent = 'Save';
+      }
     });
 
     // ── Quote footer ──────────────────────────────────────────────────────────

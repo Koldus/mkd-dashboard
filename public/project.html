@@ -5,10 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Project — Workspace</title>
   <link rel="icon" type="image/png" href="/favicon.png" />
-  <link rel="stylesheet" href="https://uicdn.toast.com/editor/latest/toastui-editor.min.css" />
-  <link rel="stylesheet" href="https://uicdn.toast.com/editor/latest/toastui-editor-dark.min.css" />
   <link rel="stylesheet" href="style.css" />
-  <script src="https://uicdn.toast.com/editor/latest/toastui-editor-all.min.js"></script>
 </head>
 <body>
 
@@ -30,13 +27,65 @@
     </div>
   </header>
 
+  <!-- Task modal -->
+  <div class="modal-overlay" id="task-modal-overlay">
+    <div class="modal">
+      <div class="modal-title" id="task-modal-title">New Task</div>
+      <div class="modal-body">
+        <label class="modal-field">
+          <span class="modal-label">Task</span>
+          <input type="text" id="task-modal-name" class="modal-input" placeholder="Task name" autocomplete="off" />
+        </label>
+        <label class="modal-field">
+          <span class="modal-label">Status</span>
+          <select id="task-modal-status" class="modal-input">
+            <option>Backlog</option>
+            <option>Plan soon</option>
+            <option>This Week</option>
+            <option>Today</option>
+            <option>In progress</option>
+            <option>On Hold</option>
+          </select>
+        </label>
+        <label class="modal-field">
+          <span class="modal-label">Project</span>
+          <input type="text" id="task-modal-project" class="modal-input" list="task-project-options" autocomplete="off" />
+          <datalist id="task-project-options"></datalist>
+        </label>
+        <label class="modal-field">
+          <span class="modal-label">Job Type</span>
+          <select id="task-modal-jobtype" class="modal-input">
+            <option value="">—</option>
+            <option>Day - manual</option>
+            <option>Night - automated</option>
+          </select>
+        </label>
+        <div class="modal-field">
+          <span class="modal-label">Activity</span>
+          <div class="modal-pills" id="task-modal-activity"></div>
+        </div>
+        <label class="modal-field">
+          <span class="modal-label">Folder</span>
+          <input type="text" id="task-modal-folder" class="modal-input" list="task-folder-options" autocomplete="off" placeholder="optional" />
+          <datalist id="task-folder-options"></datalist>
+        </label>
+      </div>
+      <div class="modal-actions">
+        <button class="modal-btn" id="task-modal-cancel">Cancel</button>
+        <button class="modal-btn modal-btn-primary" id="task-modal-submit">Save</button>
+      </div>
+    </div>
+  </div>
+
   <script>
+    let wsActivityTypes = [];
     fetch('/api/workspace').then(r => r.json()).then(ws => {
       const features = new Set(ws.features);
       document.querySelectorAll('[data-feature]').forEach(el => {
         if (!features.has(el.dataset.feature)) el.style.display = 'none';
       });
       document.title = document.title.replace('Workspace', ws.name);
+      wsActivityTypes = ws.activityTypes || [];
     });
   </script>
 
@@ -65,13 +114,21 @@
       <div class="proj-hresize" id="sidebar-hresize"></div>
 
       <div class="proj-panel" id="tasks-panel">
-        <div class="proj-panel-header">Tasks</div>
+        <div class="proj-panel-header">
+          Tasks
+          <div style="display:flex;align-items:center;gap:4px;">
+            <select id="task-status-filter" class="task-filter-select task-filter-select--small">
+              <option value="">all</option>
+            </select>
+            <select id="task-activity-filter" class="task-filter-select task-filter-select--small">
+              <option value="">all</option>
+            </select>
+            <button class="icon-btn" id="task-sort-btn" title="Sort by status">↕</button>
+            <button class="icon-btn" id="task-new-btn" title="New task">+</button>
+          </div>
+        </div>
         <div class="proj-panel-body" id="tasks-body">
           <p class="proj-empty">Loading…</p>
-        </div>
-        <div class="proj-task-create" id="task-create-row">
-          <input type="text" id="task-create-input" class="proj-task-create-input" placeholder="Add task…" />
-          <button class="proj-task-create-btn" id="task-create-btn">+</button>
         </div>
       </div>
 
@@ -204,7 +261,7 @@
       try { return new URL(url).hostname; } catch { return url; }
     }
 
-    const LINK_SECTIONS    = new Set(['Documentation', 'Links & Resources']);
+    const LINK_SECTIONS    = new Set(['Documentation', 'Links & Resources', 'Shopping List']);
     const TODO_SECTION     = 'To-Do';
     const STATUS_VALUES    = ['active', 'on hold', 'paused', 'backlog', 'done'];
 
@@ -597,8 +654,16 @@
         const sel = body.querySelector('select');
         sel.focus();
         sel.addEventListener('change', async () => {
-          setReadmeStatus(sel.value);
+          const newStatus = sel.value;
+          setReadmeStatus(newStatus);
           await saveReadme();
+          if (root === 'projects' && projectPath) {
+            await fetch('/api/project-status', {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ path: `${projectPath}/README.md`, status: newStatus }),
+            });
+          }
           renderReadme(pane);
         });
         sel.addEventListener('blur', () => renderReadme(pane));
@@ -632,6 +697,18 @@
             `</div></form></div>`;
           widget.appendChild(groupEl);
         });
+
+        const addFolderEl = document.createElement('div');
+        addFolderEl.className = 'links-add-folder-area';
+        addFolderEl.innerHTML =
+          `<button class="add-folder-trigger" data-sec="${esc(sec.name)}">+ Add folder</button>` +
+          `<form class="add-folder-form" data-sec="${esc(sec.name)}">` +
+          `<input class="link-input" name="folder-name" placeholder="Folder name…" autocomplete="off" />` +
+          `<div class="link-form-actions">` +
+          `<button type="submit" class="link-save-btn">Add</button>` +
+          `<button type="button" class="link-cancel-btn">Cancel</button>` +
+          `</div></form>`;
+        widget.appendChild(addFolderEl);
         rightCol.appendChild(widget);
       }
 
@@ -678,6 +755,29 @@
           const group = getGroup(form);
           if (!group) return;
           group.links.push({ label, url });
+          await saveReadme();
+          renderReadme(pane);
+        });
+        form.querySelector('.link-cancel-btn').addEventListener('click', () => renderReadme(pane));
+      });
+
+      pane.querySelectorAll('.add-folder-trigger').forEach(trigger => {
+        trigger.addEventListener('click', () => {
+          trigger.style.display = 'none';
+          const form = trigger.nextElementSibling;
+          form.classList.add('open');
+          form.querySelector('[name="folder-name"]').focus();
+        });
+      });
+
+      pane.querySelectorAll('.add-folder-form').forEach(form => {
+        form.addEventListener('submit', async e => {
+          e.preventDefault();
+          const name = form.querySelector('[name="folder-name"]').value.trim();
+          if (!name) return;
+          const sec = readmeDoc.sections.find(s => s.name === form.dataset.sec);
+          if (!sec) return;
+          sec.groups.push({ heading: name, links: [] });
           await saveReadme();
           renderReadme(pane);
         });
@@ -753,24 +853,89 @@
     if (root === 'f1') loadProjectTasks(null);
 
     // ── Tasks ───────────────────────────────────────────────────────────────────
-    const TASK_STATUSES = ['This Week', 'Today', 'In progress', 'Done'];
+    const STATUS_SORT_ORDER = ['Today', 'In progress', 'This Week', 'Plan soon', 'Backlog', 'On Hold'];
     let currentNotionProject = null;
+    let taskById = {};
+    let allProjectTasks = [];
+    let taskSortByStatus = false;
 
     function renderTaskItem(t) {
       const slug = (t.status ?? '').toLowerCase().replace(/\s+/g, '-');
+      const acts = (t.activity ?? []).map(a => `<span class="task-badge task-badge-activity">${esc(a)}</span>`).join('');
       return `<div class="proj-task-item" data-id="${esc(t.id)}">` +
         `<a class="proj-task-title" href="${esc(t.url)}" target="_blank" rel="noopener">${esc(t.title)}</a>` +
         `<div class="proj-task-row">` +
         `<span class="proj-task-status proj-task-status--${slug}">${esc(t.status ?? '')}</span>` +
-        `<div class="proj-task-status-wrap">` +
-        `<button class="proj-task-status-trigger" title="Change status" data-id="${esc(t.id)}">⋯</button>` +
-        `<div class="proj-task-status-menu">` +
-        TASK_STATUSES.map(s =>
-          `<button class="proj-task-status-option${s === t.status ? ' active' : ''}" data-status="${esc(s)}" data-id="${esc(t.id)}">${esc(s)}</button>`
-        ).join('') +
-        `</div></div>` +
+        (acts ? `<div class="proj-task-badges">${acts}</div>` : '') +
+        `<button class="proj-task-edit-btn" data-id="${esc(t.id)}" title="Edit">✎</button>` +
         `</div>` +
         `</div>`;
+    }
+
+    function renderTaskList() {
+      const body = document.getElementById('tasks-body');
+      const act    = document.getElementById('task-activity-filter').value;
+      const status = document.getElementById('task-status-filter').value;
+
+      let visible = allProjectTasks;
+      if (act)    visible = visible.filter(t => Array.isArray(t.activity) && t.activity.includes(act));
+      if (status) visible = visible.filter(t => t.status === status);
+
+      if (taskSortByStatus) {
+        visible = [...visible].sort((a, b) => {
+          const ai = STATUS_SORT_ORDER.indexOf(a.status ?? '');
+          const bi = STATUS_SORT_ORDER.indexOf(b.status ?? '');
+          return (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi);
+        });
+      }
+
+      if (visible.length === 0) {
+        body.innerHTML = '<p class="proj-empty">No open tasks</p>';
+        return;
+      }
+
+      const hasFolders = visible.some(t => t.folder);
+      if (!hasFolders) {
+        body.innerHTML = visible.map(renderTaskItem).join('');
+        return;
+      }
+
+      // Group by folder; ungrouped tasks float to top
+      const grouped = new Map();
+      const ungrouped = [];
+      for (const t of visible) {
+        if (t.folder) {
+          if (!grouped.has(t.folder)) grouped.set(t.folder, []);
+          grouped.get(t.folder).push(t);
+        } else {
+          ungrouped.push(t);
+        }
+      }
+
+      let html = ungrouped.map(renderTaskItem).join('');
+      for (const [folderName, tasks] of grouped) {
+        html +=
+          `<div class="folder-item">` +
+          `<div class="folder-header">` +
+          `<span class="folder-chevron"></span>` +
+          `<span class="folder-name">${esc(folderName)}</span>` +
+          `<span class="folder-count" style="margin-left:auto;font-size:11px;color:var(--muted2);padding-right:4px;">${tasks.length}</span>` +
+          `</div>` +
+          `<div class="folder-children">` +
+          tasks.map(renderTaskItem).join('') +
+          `</div>` +
+          `</div>`;
+      }
+
+      body.innerHTML = html;
+      body.querySelectorAll('.folder-header').forEach(header => {
+        header.addEventListener('click', () => {
+          const children = header.nextElementSibling;
+          const chevron  = header.querySelector('.folder-chevron');
+          children.classList.toggle('collapsed');
+          chevron.classList.toggle('collapsed');
+        });
+      });
     }
 
     function loadProjectTasks(notionProject) {
@@ -787,71 +952,122 @@
             body.innerHTML = '<p class="proj-empty">Tasks unavailable</p>';
             return;
           }
-          const all = [...(data.today ?? []), ...(data.backlog ?? [])];
-          if (all.length === 0) {
-            body.innerHTML = '<p class="proj-empty">No open tasks</p>';
-            return;
-          }
-          body.innerHTML = all.map(renderTaskItem).join('');
+          allProjectTasks = [...(data.today ?? []), ...(data.backlog ?? [])];
+          taskById = Object.fromEntries(allProjectTasks.map(t => [t.id, t]));
+          // Populate project datalist from unique project names in loaded tasks
+          const projects = [...new Set(allProjectTasks.map(t => t.project).filter(Boolean))];
+          document.getElementById('task-project-options').innerHTML =
+            projects.map(p => `<option value="${p}"></option>`).join('');
+          // Populate folder datalist
+          const folders = [...new Set(allProjectTasks.map(t => t.folder).filter(Boolean))];
+          document.getElementById('task-folder-options').innerHTML =
+            folders.map(f => `<option value="${f}"></option>`).join('');
+          // Populate status filter from unique statuses in loaded tasks
+          const statSel = document.getElementById('task-status-filter');
+          const prevStat = statSel.value;
+          const statuses = STATUS_SORT_ORDER.filter(s => allProjectTasks.some(t => t.status === s));
+          statSel.innerHTML = '<option value="">all</option>' +
+            statuses.map(s => `<option value="${s}">${s}</option>`).join('');
+          if (prevStat) statSel.value = prevStat;
+          // Populate activity filter
+          const actSel = document.getElementById('task-activity-filter');
+          const prevAct = actSel.value;
+          actSel.innerHTML = '<option value="">all</option>' +
+            wsActivityTypes.map(a => `<option value="${a}">${a}</option>`).join('');
+          if (prevAct) actSel.value = prevAct;
+          renderTaskList();
         })
         .catch(() => {
           body.innerHTML = '<p class="proj-empty">Tasks unavailable</p>';
         });
     }
 
-    // Status dropdown toggle
-    document.getElementById('tasks-body').addEventListener('click', async e => {
-      const triggerBtn = e.target.closest('.proj-task-status-trigger');
-      const optionBtn  = e.target.closest('.proj-task-status-option');
+    document.getElementById('task-activity-filter').addEventListener('change', renderTaskList);
+    document.getElementById('task-status-filter').addEventListener('change', renderTaskList);
 
-      if (optionBtn) {
-        const { id, status } = optionBtn.dataset;
-        const menu = optionBtn.closest('.proj-task-status-menu');
-        menu.classList.remove('open');
-        const res = await fetch(`/api/tasks/${encodeURIComponent(id)}`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ status }),
-        });
-        if (res.ok) loadProjectTasks(currentNotionProject);
-        return;
-      }
-
-      if (triggerBtn) {
-        e.stopPropagation();
-        const menu = triggerBtn.nextElementSibling;
-        const isOpen = menu.classList.contains('open');
-        document.querySelectorAll('.proj-task-status-menu.open').forEach(m => m.classList.remove('open'));
-        if (!isOpen) menu.classList.add('open');
-        return;
-      }
+    document.getElementById('task-sort-btn').addEventListener('click', () => {
+      taskSortByStatus = !taskSortByStatus;
+      document.getElementById('task-sort-btn').style.color = taskSortByStatus ? 'var(--accent)' : '';
+      renderTaskList();
     });
 
-    document.addEventListener('click', () => {
-      document.querySelectorAll('.proj-task-status-menu.open').forEach(m => m.classList.remove('open'));
+    // Edit button on task items
+    document.getElementById('tasks-body').addEventListener('click', e => {
+      const btn = e.target.closest('.proj-task-edit-btn');
+      if (btn) openTaskModal(btn.dataset.id);
     });
 
-    // Create task
-    async function createTask() {
-      const input = document.getElementById('task-create-input');
-      const title = input.value.trim();
-      if (!title) return;
-      input.disabled = true;
-      const res = await fetch('/api/tasks', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title, project: currentNotionProject }),
-      });
-      input.disabled = false;
-      if (res.ok) {
-        input.value = '';
-        loadProjectTasks(currentNotionProject);
-      }
+    // ── Task modal ──────────────────────────────────────────────────────────────
+    let editingTaskId = null;
+
+    function buildActivityPills(selected = []) {
+      const container = document.getElementById('task-modal-activity');
+      container.innerHTML = wsActivityTypes.map(a =>
+        `<label class="pill-toggle">` +
+        `<input type="checkbox" value="${esc(a)}"${selected.includes(a) ? ' checked' : ''} />` +
+        `<span>${esc(a)}</span>` +
+        `</label>`
+      ).join('');
     }
 
-    document.getElementById('task-create-btn').addEventListener('click', createTask);
-    document.getElementById('task-create-input').addEventListener('keydown', e => {
-      if (e.key === 'Enter') createTask();
+    function openTaskModal(taskId = null) {
+      editingTaskId = taskId;
+      const t = taskId ? taskById[taskId] : null;
+      document.getElementById('task-modal-title').textContent = t ? 'Edit Task' : 'New Task';
+      document.getElementById('task-modal-name').value    = t ? t.title   : '';
+      document.getElementById('task-modal-status').value  = t ? (t.status ?? 'Backlog') : 'Backlog';
+      document.getElementById('task-modal-project').value = t ? (t.project ?? currentNotionProject ?? '') : (currentNotionProject ?? '');
+      document.getElementById('task-modal-jobtype').value = t ? (t.jobType ?? '') : '';
+      document.getElementById('task-modal-folder').value  = t ? (t.folder ?? '') : '';
+      buildActivityPills(t ? (t.activity ?? []) : []);
+      document.getElementById('task-modal-overlay').classList.add('open');
+      document.getElementById('task-modal-name').focus();
+    }
+
+    function closeTaskModal() {
+      document.getElementById('task-modal-overlay').classList.remove('open');
+      editingTaskId = null;
+    }
+
+    document.getElementById('task-new-btn').addEventListener('click', () => openTaskModal());
+    document.getElementById('task-modal-cancel').addEventListener('click', closeTaskModal);
+    document.getElementById('task-modal-overlay').addEventListener('click', e => {
+      if (e.target === document.getElementById('task-modal-overlay')) closeTaskModal();
+    });
+
+    document.getElementById('task-modal-submit').addEventListener('click', async () => {
+      const name    = document.getElementById('task-modal-name').value.trim();
+      if (!name) { document.getElementById('task-modal-name').focus(); return; }
+      const status  = document.getElementById('task-modal-status').value;
+      const project = document.getElementById('task-modal-project').value.trim() || null;
+      const jobType = document.getElementById('task-modal-jobtype').value || null;
+      const folder  = document.getElementById('task-modal-folder').value.trim() || null;
+      const activity = [...document.querySelectorAll('#task-modal-activity input:checked')].map(el => el.value);
+
+      const btn = document.getElementById('task-modal-submit');
+      btn.disabled = true;
+      btn.textContent = 'Saving…';
+
+      try {
+        if (editingTaskId) {
+          await fetch(`/api/tasks/${encodeURIComponent(editingTaskId)}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ title: name, status, project, jobType, activity, folder }),
+          });
+        } else {
+          await fetch('/api/tasks', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ title: name, status, project, jobType, activity, folder }),
+          });
+        }
+        closeTaskModal();
+        loadProjectTasks(currentNotionProject);
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Save';
+      }
     });
   </script>
 </body>

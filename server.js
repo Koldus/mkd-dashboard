@@ -20,6 +20,11 @@ const NOTION_DATA_SOURCE = ws.notionDatabaseId;
 const ALLOWED_ROOTS = new Set(ws.features);
 const PROJECT_GROUP_PREFIXES = workspaceConfig.projectGroups;
 
+function getSectionRoot(rootName) {
+  const custom = ws.customRoots && ws.customRoots[rootName];
+  return custom ? path.normalize(custom) : path.join(REPO_ROOT, rootName);
+}
+
 app.use(express.static(path.join(__dirname, 'public')));
 app.use(express.json());
 
@@ -66,7 +71,7 @@ function addToProjectsOverview(relPath, status, name) {
   fs.writeFileSync(overviewPath, lines.join('\n'), 'utf8');
 }
 
-const README_TEMPLATE = (title, status) =>
+const README_TEMPLATE_WORK = (title, status) =>
 `# ${title}
 
 **Status:** ${status}
@@ -94,6 +99,31 @@ const README_TEMPLATE = (title, status) =>
 - [Design Studio Branch]()
 - [Figma]()
 `;
+
+const README_TEMPLATE_HOME = (title, status) =>
+`# ${title}
+
+**Status:** ${status}
+**Notion Project:** ${title}
+
+## Goal
+
+## To-Do
+
+- [ ]
+
+## Shopping List
+
+## Decisions
+
+| Date | Decision | Reason |
+|------|----------|--------|
+
+## Links & Resources
+
+`;
+
+const README_TEMPLATE = WORKSPACE_ID === 'home' ? README_TEMPLATE_HOME : README_TEMPLATE_WORK;
 
 // ── Parse markdown tables from projects/README.md ───────────────────────────
 function parseProjects() {
@@ -134,6 +164,45 @@ app.get('/api/projects', (req, res) => {
   }
 });
 
+function parseYamlFrontMatter(content) {
+  const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---/);
+  if (!match) return {};
+  const meta = {};
+  for (const line of match[1].split(/\r?\n/)) {
+    const m = line.match(/^(\w+):\s*"?([^"]*)"?\s*$/);
+    if (m) meta[m[1]] = m[2];
+  }
+  return meta;
+}
+
+// GET /api/f1/projects — scan Active/ and Backlog/ under the f1 custom root
+app.get('/api/f1/projects', (req, res) => {
+  if (!ALLOWED_ROOTS.has('f1')) return res.status(403).json({ error: 'Forbidden' });
+  const f1Root = getSectionRoot('f1');
+  const statuses = ['Active', 'Backlog'];
+  const projects = [];
+
+  try {
+    for (const status of statuses) {
+      const dir = path.join(f1Root, status);
+      if (!fs.existsSync(dir)) continue;
+      for (const name of fs.readdirSync(dir)) {
+        if (name.startsWith('.') || name.startsWith('_')) continue;
+        const projectDir = path.join(dir, name);
+        if (!fs.statSync(projectDir).isDirectory()) continue;
+        const mainFile = path.join(projectDir, `${name}.md`);
+        const meta = fs.existsSync(mainFile)
+          ? parseYamlFrontMatter(fs.readFileSync(mainFile, 'utf8'))
+          : {};
+        projects.push({ name, status, path: `${status}/${name}`, meta });
+      }
+    }
+    res.json(projects);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 
 // Recursively collect all .md files under a directory, skipping _template dirs and _ files
 function collectMdFiles(dir, base) {
@@ -141,7 +210,7 @@ function collectMdFiles(dir, base) {
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
     if (entry.name.startsWith('_')) continue;
     const full = path.join(dir, entry.name);
-    const rel = base ? path.join(base, entry.name) : entry.name;
+    const rel = base ? `${base}/${entry.name}` : entry.name;
     if (entry.isDirectory()) {
       const children = collectMdFiles(full, rel);
       if (children.length > 0) {
@@ -161,7 +230,7 @@ app.get('/api/project-files', (req, res) => {
   const rootName = req.query.root || 'projects';
   if (!ALLOWED_ROOTS.has(rootName)) return res.status(403).json({ error: 'Forbidden' });
 
-  const sectionRoot = path.join(REPO_ROOT, rootName);
+  const sectionRoot = getSectionRoot(rootName);
   const rel = req.query.path || '';
   const absPath = rel ? path.resolve(sectionRoot, rel) : sectionRoot;
 
@@ -185,7 +254,7 @@ app.get('/api/md', (req, res) => {
   const rootName = req.query.root || 'projects';
   if (!ALLOWED_ROOTS.has(rootName)) return res.status(403).json({ error: 'Forbidden' });
 
-  const sectionRoot = path.join(REPO_ROOT, rootName);
+  const sectionRoot = getSectionRoot(rootName);
   const rel = req.query.path || '';
   const absPath = path.resolve(sectionRoot, rel);
 
@@ -431,7 +500,7 @@ app.post('/api/project-file', (req, res) => {
   if (!ALLOWED_ROOTS.has(rootName)) return res.status(403).json({ error: 'Forbidden' });
   if (!relPath || !relPath.endsWith('.md')) return res.status(400).json({ error: 'Path must end with .md' });
 
-  const sectionRoot = path.join(REPO_ROOT, rootName);
+  const sectionRoot = getSectionRoot(rootName);
   const absPath = path.resolve(sectionRoot, relPath);
   if (!absPath.startsWith(sectionRoot + path.sep)) return res.status(403).json({ error: 'Forbidden' });
   if (fs.existsSync(absPath)) return res.status(409).json({ error: 'File already exists' });
@@ -462,7 +531,7 @@ app.delete('/api/project-file', (req, res) => {
   if (!ALLOWED_ROOTS.has(rootName)) return res.status(403).json({ error: 'Forbidden' });
   if (!relPath || !relPath.endsWith('.md')) return res.status(400).json({ error: 'Only .md files can be deleted' });
 
-  const sectionRoot = path.join(REPO_ROOT, rootName);
+  const sectionRoot = getSectionRoot(rootName);
   const absPath = path.resolve(sectionRoot, relPath);
   if (!absPath.startsWith(sectionRoot + path.sep)) return res.status(403).json({ error: 'Forbidden' });
   if (!fs.existsSync(absPath)) return res.status(404).json({ error: 'Not found' });
@@ -481,7 +550,7 @@ app.put('/api/project-file', (req, res) => {
   if (!ALLOWED_ROOTS.has(rootName)) return res.status(403).json({ error: 'Forbidden' });
   if (!relPath || !relPath.endsWith('.md')) return res.status(400).json({ error: 'Path must end with .md' });
 
-  const sectionRoot = path.join(REPO_ROOT, rootName);
+  const sectionRoot = getSectionRoot(rootName);
   const absPath = path.resolve(sectionRoot, relPath);
   if (!absPath.startsWith(sectionRoot + path.sep)) return res.status(403).json({ error: 'Forbidden' });
   if (!fs.existsSync(absPath)) return res.status(404).json({ error: 'Not found' });
@@ -533,7 +602,7 @@ app.post('/api/project-folder', (req, res) => {
   if (!ALLOWED_ROOTS.has(rootName)) return res.status(403).json({ error: 'Forbidden' });
   if (!relPath) return res.status(400).json({ error: 'Path required' });
 
-  const sectionRoot = path.join(REPO_ROOT, rootName);
+  const sectionRoot = getSectionRoot(rootName);
   const absPath = path.resolve(sectionRoot, relPath);
   if (!absPath.startsWith(sectionRoot + path.sep)) return res.status(403).json({ error: 'Forbidden' });
   if (fs.existsSync(absPath)) return res.status(409).json({ error: 'Folder already exists' });
@@ -552,7 +621,7 @@ app.delete('/api/project-folder', (req, res) => {
   if (!ALLOWED_ROOTS.has(rootName)) return res.status(403).json({ error: 'Forbidden' });
   if (!relPath) return res.status(400).json({ error: 'Path required' });
 
-  const sectionRoot = path.join(REPO_ROOT, rootName);
+  const sectionRoot = getSectionRoot(rootName);
   const absPath = path.resolve(sectionRoot, relPath);
   if (!absPath.startsWith(sectionRoot + path.sep)) return res.status(403).json({ error: 'Forbidden' });
   if (absPath === sectionRoot) return res.status(400).json({ error: 'Cannot delete root' });
@@ -571,7 +640,7 @@ app.post('/api/project-file/move', (req, res) => {
   const { root: rootName, from: fromRel, to: toRel } = req.body;
   if (!ALLOWED_ROOTS.has(rootName)) return res.status(403).json({ error: 'Forbidden' });
 
-  const sectionRoot = path.join(REPO_ROOT, rootName);
+  const sectionRoot = getSectionRoot(rootName);
   const fromAbs = path.resolve(sectionRoot, fromRel);
   const toAbs   = path.resolve(sectionRoot, toRel);
 
@@ -619,7 +688,46 @@ app.get('/api/workspace', (req, res) => {
     name: ws.name,
     features: ws.features,
     projectGroups: PROJECT_GROUP_PREFIXES,
+    activityTypes: ws.activityTypes || [],
   });
+});
+
+// GET /api/project-groups — dynamic group list from projects/README.md
+app.get('/api/project-groups', (req, res) => {
+  const overviewPath = path.join(REPO_ROOT, 'projects', 'README.md');
+  if (!fs.existsSync(overviewPath)) {
+    return res.json(PROJECT_GROUP_PREFIXES.map(g => ({
+      label: g.section.replace(/^## /, ''),
+      prefix: g.prefix,
+    })));
+  }
+
+  const content = fs.readFileSync(overviewPath, 'utf8').replace(/\r\n/g, '\n');
+  const groups = [];
+  let cur = null;
+
+  for (const line of content.split('\n')) {
+    const h2 = line.match(/^## (.+)/);
+    if (h2) {
+      if (cur) groups.push(cur);
+      cur = { label: h2[1].trim(), prefix: null };
+      continue;
+    }
+    if (cur && cur.prefix === null) {
+      const m = line.match(/\[.*?\]\((.+?)\/[^/]+\/README\.md\)/);
+      if (m) cur.prefix = m[1] + '/';
+    }
+  }
+  if (cur) groups.push(cur);
+
+  for (const g of groups) {
+    if (g.prefix === null) {
+      g.prefix = g.label.toLowerCase()
+        .replace(/&/g, 'and').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') + '/';
+    }
+  }
+
+  res.json(groups);
 });
 
 // GET /api/tasks — live data from Notion
@@ -632,6 +740,8 @@ const mapPage = (page) => ({
   status: page.properties['Status']?.status?.name ?? null,
   project: page.properties['Project']?.select?.name ?? null,
   jobType: page.properties['Job Type']?.select?.name ?? null,
+  activity: (page.properties['Activity']?.multi_select ?? []).map(a => a.name),
+  folder: page.properties['Folder']?.select?.name ?? null,
   url: page.url,
 });
 
@@ -667,13 +777,17 @@ app.get('/api/tasks', async (req, res) => {
 
 // POST /api/tasks — create a new task in Notion
 app.post('/api/tasks', async (req, res) => {
-  const { title, project } = req.body;
+  const { title, project, status, jobType, activity, folder } = req.body;
   if (!title) return res.status(400).json({ error: 'title required' });
   try {
     const properties = {
       Name: { title: [{ text: { content: title } }] },
     };
-    if (project) properties['Project'] = { select: { name: project } };
+    if (project)          properties['Project']  = { select: { name: project } };
+    if (status)           properties['Status']   = { status: { name: status } };
+    if (jobType)          properties['Job Type'] = { select: { name: jobType } };
+    if (activity?.length) properties['Activity'] = { multi_select: activity.map(a => ({ name: a })) };
+    if (folder)           properties['Folder']   = { select: { name: folder } };
     const page = await notion.pages.create({
       parent: { data_source_id: NOTION_DATA_SOURCE },
       properties,
@@ -685,20 +799,40 @@ app.post('/api/tasks', async (req, res) => {
   }
 });
 
-// PUT /api/tasks/:id — update a task's status
+// PUT /api/tasks/:id — update a task
 app.put('/api/tasks/:id', async (req, res) => {
-  const { status } = req.body;
-  if (!status) return res.status(400).json({ error: 'status required' });
+  const { title, status, project, jobType, activity, folder } = req.body;
   try {
-    await notion.pages.update({
-      page_id: req.params.id,
-      properties: { Status: { status: { name: status } } },
-    });
+    const properties = {};
+    if (title)               properties['Name']     = { title: [{ text: { content: title } }] };
+    if (status)              properties['Status']   = { status: { name: status } };
+    if (project !== undefined)  properties['Project']  = project ? { select: { name: project } } : { select: null };
+    if (jobType !== undefined)  properties['Job Type'] = jobType ? { select: { name: jobType } } : { select: null };
+    if (folder !== undefined)   properties['Folder']   = folder  ? { select: { name: folder  } } : { select: null };
+    if (activity !== undefined) properties['Activity'] = { multi_select: (activity || []).map(a => ({ name: a })) };
+    await notion.pages.update({ page_id: req.params.id, properties });
     res.json({ ok: true });
   } catch (err) {
     console.error('[tasks] update error:', err.message);
     res.status(500).json({ error: err.message });
   }
+});
+
+// GET /files/:root/* — serve workspace attachments (images, PDFs, etc.)
+// Markdown files are excluded; all paths are validated against the section root.
+app.get('/files/:root/*', (req, res) => {
+  const rootName = req.params.root;
+  if (!ALLOWED_ROOTS.has(rootName)) return res.status(403).send('Forbidden');
+
+  const sectionRoot = getSectionRoot(rootName);
+  const relPath = req.params[0];
+  const absPath = path.resolve(sectionRoot, relPath);
+
+  if (!absPath.startsWith(sectionRoot + path.sep)) return res.status(403).send('Forbidden');
+  if (path.extname(absPath).toLowerCase() === '.md') return res.status(403).send('Forbidden');
+  if (!fs.existsSync(absPath)) return res.status(404).send('Not found');
+
+  res.sendFile(absPath);
 });
 
 app.listen(PORT, () => {
