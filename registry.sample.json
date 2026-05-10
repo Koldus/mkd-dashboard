@@ -2,19 +2,19 @@
   "workspaces": [
     {
       "id": "work",
-      "name": "Working Station",
-      "path": "/path/to/mkd-working-station",
+      "name": "Work",
+      "path": "/path/to/your-workspace",
       "notionDatabaseId": "",
-      "features": ["projects", "meetings", "notebook", "f1"],
+      "features": ["projects", "meetings", "notebook"],
       "activityTypes": ["Organization", "Learning", "Meeting"],
       "customRoots": {
-        "f1": "/path/to/gd-design-studio/projects/F1"
+        "f1": "/path/to/external/projects/F1"
       }
     },
     {
       "id": "home",
-      "name": "Home Station",
-      "path": "/path/to/mkd-home-station",
+      "name": "Home",
+      "path": "/path/to/your-home-workspace",
       "notionDatabaseId": "",
       "features": ["projects", "notebook"],
       "activityTypes": ["Organization", "Reading", "Learning"]

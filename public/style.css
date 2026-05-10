@@ -2297,7 +2297,7 @@ tr:hover .item-delete-btn { display: inline-block; }
   color: var(--text);
   cursor: pointer;
 }
-.proj-task-status-option:hover { background: var(--surface3); }
+.proj-task-status-option:hover { background: var(--surface2); }
 .proj-task-status-option.active { color: var(--accent); }
 
 .proj-task-badges {
@@ -2308,7 +2308,7 @@ tr:hover .item-delete-btn { display: inline-block; }
 
 .task-badge-activity {
   font-size: 10px;
-  background: var(--surface3);
+  background: var(--surface2);
   color: var(--muted2);
   border-radius: 3px;
   padding: 1px 5px;
@@ -2382,7 +2382,7 @@ tr:hover .item-delete-btn { display: inline-block; }
   color: var(--muted);
   cursor: pointer;
 }
-.proj-task-create-btn:hover { color: var(--text); background: var(--surface3); }
+.proj-task-create-btn:hover { color: var(--text); background: var(--surface2); }
 
 /* File rows with delete button */
 .file-row {

@@ -49,7 +49,7 @@ Gitignored. Maps workspace IDs to local paths and Notion config. See `registry.s
       "customRoots": {
         "f1": "/path/to/external/projects/F1"
       },
-      "notionTasksDbId": "..."
+      "notionDatabaseId": "..."
     }
   ]
 }
