@@ -1699,6 +1699,8 @@ tr:hover .item-delete-btn { display: inline-block; }
   gap: 2px;
 }
 
+.proj-panel-body[hidden] { display: none; }
+
 /* Horizontal drag handle between sidebar panels */
 .proj-hresize {
   height: 5px;
@@ -2771,3 +2773,99 @@ tr:hover .item-delete-btn { display: inline-block; }
   padding: 5px 10px;
   outline: none;
 }
+
+/* ── Files panel tab bar ──────────────────────────────────────────────────── */
+.files-tab-bar {
+  display: flex;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.files-tab-bar[hidden] { display: none; }
+
+.files-tab {
+  flex: 1;
+  appearance: none;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--muted2);
+  font-size: 11px;
+  font-weight: 500;
+  padding: 6px 0;
+  cursor: pointer;
+  transition: color 0.1s, border-color 0.1s;
+}
+
+.files-tab:hover { color: var(--text); }
+.files-tab.active { color: var(--text); border-bottom-color: var(--accent); }
+
+/* ── Worktree widget in readme ────────────────────────────────────────────── */
+.readme-wt-body {
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+}
+
+.readme-wt-connected {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.readme-wt-name {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text);
+}
+
+.readme-wt-f1path {
+  font-size: 11px;
+  color: var(--muted2);
+}
+
+.readme-wt-btn {
+  appearance: none;
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--muted2);
+  font-size: 11px;
+  font-family: inherit;
+  cursor: pointer;
+  padding: 3px 8px;
+  margin-top: 6px;
+  align-self: flex-start;
+  transition: color 0.1s, border-color 0.1s;
+}
+
+.readme-wt-btn:hover { color: var(--text); border-color: var(--accent); }
+
+.readme-wt-form {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.readme-wt-form select,
+.readme-wt-form input {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  color: var(--text);
+  font-size: 12px;
+  font-family: inherit;
+  padding: 4px 8px;
+  outline: none;
+  width: 100%;
+}
+
+.readme-wt-form select:focus,
+.readme-wt-form input:focus { border-color: var(--accent); }
+
+.readme-wt-form-actions {
+  display: flex;
+  gap: 6px;
+}
+
+

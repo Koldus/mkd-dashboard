@@ -102,7 +102,12 @@
             <button class="proj-panel-action" id="folder-add-btn" title="New folder">⊕</button>
           </div>
         </div>
+        <div class="files-tab-bar" id="files-tabs" hidden>
+          <button class="files-tab active" data-tab="project">Project</button>
+          <button class="files-tab" data-tab="worktree">Worktree</button>
+        </div>
         <nav class="proj-panel-body" id="file-nav"></nav>
+        <nav class="proj-panel-body" id="worktree-nav" hidden></nav>
         <div class="proj-new-file" id="new-file-row" hidden>
           <input class="proj-new-file-input" id="new-file-input" placeholder="filename" autocomplete="off" spellcheck="false" />
         </div>
@@ -279,6 +284,224 @@
           readmeDoc.headerLines[i] = `**Status:** ${newStatus}`;
           return;
         }
+      }
+    }
+
+    // ── Worktree README helpers ─────────────────────────────────────────────
+    function getWorktreePath() {
+      if (!readmeDoc) return '';
+      for (const line of readmeDoc.headerLines) {
+        const m = line.match(/^\*\*Worktree:\*\*\s*(.+)/);
+        if (m) return m[1].trim();
+      }
+      return '';
+    }
+
+    function getWorktreeF1Path() {
+      if (!readmeDoc) return '';
+      for (const line of readmeDoc.headerLines) {
+        const m = line.match(/^\*\*F1 Path:\*\*\s*(.+)/);
+        if (m) return m[1].trim();
+      }
+      return '';
+    }
+
+    function setWorktreeConnection(wtPath, f1path) {
+      let foundPath = false, foundF1 = false;
+      for (let i = 0; i < readmeDoc.headerLines.length; i++) {
+        if (readmeDoc.headerLines[i].match(/^\*\*Worktree:\*\*/)) {
+          readmeDoc.headerLines[i] = `**Worktree:** ${wtPath}`;
+          foundPath = true;
+        }
+        if (readmeDoc.headerLines[i].match(/^\*\*F1 Path:\*\*/)) {
+          readmeDoc.headerLines[i] = `**F1 Path:** ${f1path}`;
+          foundF1 = true;
+        }
+      }
+      if (!foundPath) readmeDoc.headerLines.push(`**Worktree:** ${wtPath}`);
+      if (!foundF1)   readmeDoc.headerLines.push(`**F1 Path:** ${f1path}`);
+    }
+
+    function renderWorktreeWidget(widget, pane) {
+      const wtPath   = getWorktreePath();
+      const wtF1Path = getWorktreeF1Path();
+      const wtName   = wtPath ? wtPath.split('/').pop() : '';
+      widget.innerHTML =
+        `<div class="readme-widget-header">Worktree</div>` +
+        `<div class="readme-wt-body" id="wt-widget-body">` +
+        (wtPath
+          ? `<div class="readme-wt-connected">` +
+            `<span class="readme-wt-name">${esc(wtName)}</span>` +
+            `<span class="readme-wt-f1path">${esc(wtF1Path)}</span>` +
+            `<button class="readme-wt-btn" id="wt-change-btn">Change</button>` +
+            `</div>`
+          : `<button class="readme-wt-btn" id="wt-connect-btn">Connect worktree…</button>`
+        ) +
+        `</div>`;
+      const actionBtn = widget.querySelector('#wt-connect-btn, #wt-change-btn');
+      if (actionBtn) actionBtn.addEventListener('click', () => showWorktreeForm(widget, pane));
+    }
+
+    async function showWorktreeForm(widget, pane) {
+      const wtPath    = getWorktreePath();
+      const wtF1Path  = getWorktreeF1Path();
+      const parts     = wtF1Path ? wtF1Path.split('/') : [];
+      const curStatus = parts[0] || 'Active';
+      const curFolder = parts.slice(1).join('/');
+
+      let worktrees = [];
+      try { worktrees = await fetch('/api/worktree-dirs').then(r => r.json()); } catch {}
+
+      const body = widget.querySelector('#wt-widget-body');
+      body.innerHTML =
+        `<div class="readme-wt-form">` +
+        `<select id="wt-form-worktree">` +
+        `<option value="">— select worktree —</option>` +
+        worktrees.map(w =>
+          `<option value="${esc(w.path)}"${w.path === wtPath ? ' selected' : ''}>${esc(w.name)}</option>`
+        ).join('') +
+        `</select>` +
+        `<select id="wt-form-status">` +
+        `<option value="Active"${curStatus === 'Active' ? ' selected' : ''}>Active</option>` +
+        `<option value="Backlog"${curStatus === 'Backlog' ? ' selected' : ''}>Backlog</option>` +
+        `</select>` +
+        `<input id="wt-form-folder" placeholder="Folder name…" value="${esc(curFolder)}" autocomplete="off" />` +
+        `<div class="readme-wt-form-actions">` +
+        `<button class="link-save-btn" id="wt-form-save">Save</button>` +
+        `<button class="link-cancel-btn" id="wt-form-cancel">Cancel</button>` +
+        `</div></div>`;
+
+      widget.querySelector('#wt-form-save').addEventListener('click', async () => {
+        const wt  = widget.querySelector('#wt-form-worktree').value;
+        const st  = widget.querySelector('#wt-form-status').value;
+        const fol = widget.querySelector('#wt-form-folder').value.trim();
+        if (!wt || !fol) return;
+        setWorktreeConnection(wt, `${st}/${fol}`);
+        await saveReadme();
+        renderReadme(pane);
+      });
+      widget.querySelector('#wt-form-cancel').addEventListener('click', () => renderWorktreeWidget(widget, pane));
+      widget.querySelector('#wt-form-worktree').focus();
+    }
+
+    // ── File sidebar tabs ────────────────────────────────────────────────────
+    let activeFileTab = 'project';
+
+    function refreshFilesTabs() {
+      const wtPath = getWorktreePath();
+      const tabBar = document.getElementById('files-tabs');
+      if (!wtPath) { tabBar.hidden = true; return; }
+      tabBar.hidden = false;
+      tabBar.querySelectorAll('.files-tab').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.tab === activeFileTab);
+      });
+      applyFileTab();
+    }
+
+    function applyFileTab() {
+      const fileNav = document.getElementById('file-nav');
+      const wtNav   = document.getElementById('worktree-nav');
+      if (activeFileTab === 'worktree') {
+        fileNav.hidden = true;
+        wtNav.hidden = false;
+        loadWorktreeNav();
+      } else {
+        fileNav.hidden = false;
+        wtNav.hidden = true;
+      }
+    }
+
+    async function loadWorktreeNav() {
+      const wtPath   = getWorktreePath();
+      const wtF1Path = getWorktreeF1Path();
+      const wtNav    = document.getElementById('worktree-nav');
+      wtNav.innerHTML = '<p class="proj-empty">Loading…</p>';
+      try {
+        const files = await fetch(
+          `/api/worktree-files?worktree=${encodeURIComponent(wtPath)}&f1path=${encodeURIComponent(wtF1Path)}`
+        ).then(r => r.json());
+        if (!files.length) { wtNav.innerHTML = '<p class="proj-empty">No files found</p>'; return; }
+        wtNav.innerHTML = '';
+        renderWorktreeTree(files, wtNav);
+      } catch {
+        wtNav.innerHTML = '<p class="proj-empty">Error loading files</p>';
+      }
+    }
+
+    function renderWorktreeTree(files, container) {
+      const tree = { dirs: {}, files: [] };
+      for (const f of files) {
+        if (f.endsWith('/')) continue;
+        const parts = f.split('/');
+        let node = tree;
+        for (let i = 0; i < parts.length - 1; i++) {
+          if (!node.dirs[parts[i]]) node.dirs[parts[i]] = { dirs: {}, files: [] };
+          node = node.dirs[parts[i]];
+        }
+        node.files.push({ name: parts[parts.length - 1], path: f });
+      }
+      renderWorktreeNode(tree, container);
+    }
+
+    function renderWorktreeNode(node, container) {
+      for (const dir of Object.keys(node.dirs).sort()) {
+        const item = document.createElement('div');
+        item.className = 'folder-item';
+        const header = document.createElement('div');
+        header.className = 'folder-header';
+        header.innerHTML =
+          `<span class="folder-chevron"></span>` +
+          `<span class="folder-name">${esc(dir)}</span>`;
+        const children = document.createElement('div');
+        children.className = 'folder-children';
+        header.addEventListener('click', () => {
+          const c = children.classList.toggle('collapsed');
+          header.querySelector('.folder-chevron').classList.toggle('collapsed', c);
+        });
+        item.appendChild(header);
+        item.appendChild(children);
+        container.appendChild(item);
+        renderWorktreeNode(node.dirs[dir], children);
+      }
+      for (const f of node.files.sort((a, b) => a.name.localeCompare(b.name))) {
+        const row = document.createElement('div');
+        row.className = 'file-row';
+        const btn = document.createElement('button');
+        btn.className = 'checklist-nav-btn';
+        btn.innerHTML =
+          `<svg class="nav-tree-icon nav-tree-icon--file" width="12" height="12" viewBox="0 0 12 12" fill="none">` +
+          `<rect x="1.5" y="0.5" width="9" height="11" rx="1" stroke="currentColor"/>` +
+          `<line x1="3.5" y1="3.5" x2="8.5" y2="3.5" stroke="currentColor"/>` +
+          `<line x1="3.5" y1="5.5" x2="8.5" y2="5.5" stroke="currentColor"/>` +
+          `<line x1="3.5" y1="7.5" x2="6.5" y2="7.5" stroke="currentColor"/>` +
+          `</svg>` +
+          `<span class="file-label">${esc(f.name.replace(/\.md$/, ''))}</span>`;
+        btn.addEventListener('click', () => openWorktreeFile(f.path));
+        row.appendChild(btn);
+        container.appendChild(row);
+      }
+    }
+
+    async function openWorktreeFile(relPath) {
+      const wtPath   = getWorktreePath();
+      const wtF1Path = getWorktreeF1Path();
+      const label    = relPath.split('/').pop().replace(/\.md$/, '');
+      const key      = `wt:${relPath}`;
+      try {
+        const data = await fetch(
+          `/api/worktree-md?worktree=${encodeURIComponent(wtPath)}&f1path=${encodeURIComponent(wtF1Path)}&file=${encodeURIComponent(relPath)}`
+        ).then(r => r.json());
+        editorApi.openContent(key, label, data.markdown, async (md) => {
+          const r = await fetch('/api/worktree-md', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ worktree: wtPath, f1path: wtF1Path, file: relPath, content: md }),
+          });
+          const d = await r.json();
+          if (d.error) throw new Error(d.error);
+        });
+      } catch (err) {
+        alert(`Error opening file: ${err.message}`);
       }
     }
 
@@ -671,6 +894,12 @@
 
       rightCol.appendChild(statusWidget);
 
+      // Right: Worktree connection widget
+      const wtWidget = document.createElement('div');
+      wtWidget.className = 'readme-widget';
+      renderWorktreeWidget(wtWidget, pane);
+      rightCol.appendChild(wtWidget);
+
       // Right: Documentation and Links & Resources
       for (const sec of readmeDoc.sections) {
         if (sec.type !== 'links') continue;
@@ -716,6 +945,7 @@
       layout.appendChild(rightCol);
       pane.appendChild(layout);
       bindReadmeEvents(pane);
+      refreshFilesTabs();
     }
 
     function bindReadmeEvents(pane) {
@@ -813,7 +1043,7 @@
       form.querySelector('.link-cancel-btn').addEventListener('click', () => renderReadme(pane));
     }
 
-    initEditor({
+    const editorApi = initEditor({
       root, projectPath, initialFile,
       sidebarEl:      document.getElementById('project-sidebar'),
       navEl:          document.getElementById('file-nav'),
@@ -981,6 +1211,10 @@
           body.innerHTML = '<p class="proj-empty">Tasks unavailable</p>';
         });
     }
+
+    document.querySelectorAll('.files-tab').forEach(btn => {
+      btn.addEventListener('click', () => { activeFileTab = btn.dataset.tab; refreshFilesTabs(); });
+    });
 
     document.getElementById('task-activity-filter').addEventListener('change', renderTaskList);
     document.getElementById('task-status-filter').addEventListener('change', renderTaskList);

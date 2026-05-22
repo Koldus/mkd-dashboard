@@ -70,7 +70,7 @@ function unresolveImages(md, baseUrl) {
 }
 
 // ── TipTap pane setup ─────────────────────────────────────────────────────────
-export function setupTuiPane(pane, tab, { markdown, root, savePath }) {
+export function setupTuiPane(pane, tab, { markdown, root, savePath, saveFn, imageBaseUrl }) {
   pane.classList.add('editor-pane-editable');
   pane.innerHTML = '';
 
@@ -146,7 +146,14 @@ export function setupTuiPane(pane, tab, { markdown, root, savePath }) {
   pane.append(saveBar, bodyWrap);
 
   // ── TipTap editor ─────────────────────────────────────────────────────────
-  const baseUrl = imgBaseUrl(root, savePath);
+  const baseUrl = imageBaseUrl !== undefined ? imageBaseUrl : imgBaseUrl(root, savePath);
+
+  // Strip YAML frontmatter before feeding to TipTap; restore on save.
+  function splitFrontmatter(md) {
+    const m = (md || '').match(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/);
+    return m ? { fm: m[0], body: md.slice(m[0].length) } : { fm: '', body: md || '' };
+  }
+  let { fm: frontmatter, body: bodyMarkdown } = splitFrontmatter(markdown);
 
   const editor = new Editor({
     element: contentEl,
@@ -160,7 +167,7 @@ export function setupTuiPane(pane, tab, { markdown, root, savePath }) {
       TableRow, TableHeader, TableCell,
       Markdown.configure({ html: true, tightLists: true }),
     ],
-    content: resolveImages(markdown || '', baseUrl),
+    content: resolveImages(bodyMarkdown, baseUrl),
     editorProps: { attributes: { spellcheck: 'false' } },
   });
 
@@ -203,19 +210,28 @@ export function setupTuiPane(pane, tab, { markdown, root, savePath }) {
   }
 
   function save() {
-    const md = unresolveImages(inSourceMode ? sourceEl.value : getMarkdown(), baseUrl);
-    fetch('/api/project-file', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ root, path: savePath, content: md }),
-    }).then(r => r.json()).then(d => {
-      if (d.error) { alert(d.error); return; }
+    const md = inSourceMode
+      ? unresolveImages(sourceEl.value, baseUrl)
+      : frontmatter + unresolveImages(getMarkdown(), baseUrl);
+    const finish = () => {
       dirty = false;
       statusEl.textContent = 'All changes saved';
       statusEl.classList.remove('dirty');
       saveBtn.disabled = true;
       tab.classList.remove('tab-dirty');
-    });
+    };
+    if (saveFn) {
+      saveFn(md).then(finish).catch(err => alert(err.message));
+    } else {
+      fetch('/api/project-file', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ root, path: savePath, content: md }),
+      }).then(r => r.json()).then(d => {
+        if (d.error) { alert(d.error); return; }
+        finish();
+      });
+    }
   }
 
   saveBtn.addEventListener('click', save);
@@ -351,12 +367,13 @@ export function setupTuiPane(pane, tab, { markdown, root, savePath }) {
   function toggleSource() {
     inSourceMode = !inSourceMode;
     if (inSourceMode) {
-      sourceEl.value = unresolveImages(getMarkdown(), baseUrl);
+      sourceEl.value = frontmatter + unresolveImages(getMarkdown(), baseUrl);
       contentEl.hidden = true; sourceEl.hidden = false;
       sourceBtn.classList.add('active');
       sourceEl.focus();
     } else {
-      editor.commands.setContent(resolveImages(sourceEl.value, baseUrl));
+      ({ fm: frontmatter, body: bodyMarkdown } = splitFrontmatter(sourceEl.value));
+      editor.commands.setContent(resolveImages(bodyMarkdown, baseUrl));
       sourceEl.hidden = true; contentEl.hidden = false;
       sourceBtn.classList.remove('active');
       editor.commands.focus();
@@ -877,5 +894,32 @@ export function initEditor({
       if (initialFile && initialFile.toLowerCase() !== 'readme.md') openFile(initialFile);
     });
 
-  return { openFile, reloadNav, activateTab, closeTab };
+  function openContent(key, label, markdown, saveFn) {
+    const existing = openTabs.find(t => t.relPath === key);
+    if (existing) { activateTab(key); return; }
+
+    const tab = document.createElement('button');
+    tab.className = 'editor-tab';
+    tab.dataset.file = key;
+    tab.innerHTML =
+      `<span class="editor-tab-label">${label}</span>` +
+      `<span class="editor-tab-close" title="Close">&#x2715;</span>`;
+    tab.querySelector('.editor-tab-close').addEventListener('click', e => {
+      e.stopPropagation();
+      closeTab(key);
+    });
+    tab.addEventListener('click', () => activateTab(key));
+
+    const pane = document.createElement('div');
+    pane.className = 'editor-pane';
+
+    tabsEl.appendChild(tab);
+    contentEl.appendChild(pane);
+    openTabs.push({ relPath: key, tabEl: tab, paneEl: pane });
+    activateTab(key);
+
+    setupTuiPane(pane, tab, { markdown, root, savePath: key, saveFn, imageBaseUrl: '' });
+  }
+
+  return { openFile, reloadNav, activateTab, closeTab, openContent };
 }

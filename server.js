@@ -19,6 +19,11 @@ const REPO_ROOT = ws.path;
 const NOTION_DATA_SOURCE = ws.notionDatabaseId;
 const ALLOWED_ROOTS = new Set(ws.features);
 const PROJECT_GROUP_PREFIXES = workspaceConfig.projectGroups;
+const WORKTREE_DIRS = ws.worktreeDirs || [];
+
+function validateWorktreePath(p) {
+  return WORKTREE_DIRS.some(d => p === d || p.startsWith(d + path.sep));
+}
 
 function getSectionRoot(rootName) {
   const custom = ws.customRoots && ws.customRoots[rootName];
@@ -203,6 +208,72 @@ app.get('/api/f1/projects', (req, res) => {
   }
 });
 
+
+// GET /api/worktree-dirs — list all worktrees across configured parent dirs
+app.get('/api/worktree-dirs', (req, res) => {
+  const result = [];
+  for (const dir of WORKTREE_DIRS) {
+    if (!fs.existsSync(dir)) continue;
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      if (entry.isDirectory() && !entry.name.startsWith('.')) {
+        result.push({ name: entry.name, path: path.join(dir, entry.name), parent: dir });
+      }
+    }
+  }
+  res.json(result);
+});
+
+// GET /api/worktree-files?worktree=/abs&f1path=Active/Name — list .md files in worktree subpath
+app.get('/api/worktree-files', (req, res) => {
+  const { worktree, f1path } = req.query;
+  console.log('[worktree-files] worktree=%s f1path=%s', worktree, f1path);
+  if (!worktree || !validateWorktreePath(worktree)) {
+    console.log('[worktree-files] FORBIDDEN — not in WORKTREE_DIRS:', WORKTREE_DIRS);
+    return res.status(403).json({ error: 'Forbidden' });
+  }
+  if (!f1path) return res.status(400).json({ error: 'f1path required' });
+  const targetDir = path.join(worktree, 'projects', 'F1', f1path);
+  console.log('[worktree-files] targetDir=%s exists=%s', targetDir, fs.existsSync(targetDir));
+  if (!fs.existsSync(targetDir)) return res.json([]);
+  try {
+    const files = collectMdFiles(targetDir, '');
+    console.log('[worktree-files] found %d files', files.length);
+    res.json(files);
+  } catch (err) {
+    console.log('[worktree-files] ERROR:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// PUT /api/worktree-md — save a file back to the worktree
+app.put('/api/worktree-md', (req, res) => {
+  const { worktree, f1path, file, content } = req.body;
+  if (!worktree || !validateWorktreePath(worktree)) return res.status(403).json({ error: 'Forbidden' });
+  if (!f1path || !file) return res.status(400).json({ error: 'f1path and file required' });
+  const baseDir = path.join(worktree, 'projects', 'F1', f1path);
+  const absPath = path.resolve(baseDir, file);
+  if (!absPath.startsWith(baseDir + path.sep)) return res.status(403).json({ error: 'Forbidden' });
+  if (!fs.existsSync(absPath)) return res.status(404).json({ error: 'Not found' });
+  try {
+    fs.writeFileSync(absPath, content, 'utf8');
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/worktree-md?worktree=/abs&f1path=Active/Name&file=rel.md — read a file from worktree
+app.get('/api/worktree-md', (req, res) => {
+  const { worktree, f1path, file } = req.query;
+  if (!worktree || !validateWorktreePath(worktree)) return res.status(403).json({ error: 'Forbidden' });
+  if (!f1path || !file) return res.status(400).json({ error: 'f1path and file required' });
+  const baseDir = path.join(worktree, 'projects', 'F1', f1path);
+  const absPath = path.resolve(baseDir, file);
+  if (!absPath.startsWith(baseDir + path.sep)) return res.status(403).json({ error: 'Forbidden' });
+  if (!fs.existsSync(absPath)) return res.status(404).json({ error: 'Not found' });
+  const markdown = fs.readFileSync(absPath, 'utf8');
+  res.json({ markdown, html: marked(markdown) });
+});
 
 // Recursively collect all .md files under a directory, skipping _template dirs and _ files
 function collectMdFiles(dir, base) {
