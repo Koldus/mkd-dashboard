@@ -1,3 +1,4 @@
 node_modules/
 .env
 registry.json
+package-lock.json
