@@ -70,7 +70,7 @@ function unresolveImages(md, baseUrl) {
 }
 
 // ── TipTap pane setup ─────────────────────────────────────────────────────────
-export function setupTuiPane(pane, tab, { markdown, root, savePath, saveFn, imageBaseUrl }) {
+export function setupTuiPane(pane, tab, { markdown, root, savePath, saveFn, imageBaseUrl, openFileFn = null, filesUrl = null }) {
   pane.classList.add('editor-pane-editable');
   pane.innerHTML = '';
 
@@ -111,6 +111,7 @@ export function setupTuiPane(pane, tab, { markdown, root, savePath, saveFn, imag
     `<button class="tt-btn" data-cmd="hr" title="Horizontal rule">—</button>` +
     `<button class="tt-btn" data-cmd="link" title="Insert link">⊕ link</button>` +
     `<button class="tt-btn" data-cmd="image" title="Insert image">⊕ img</button>` +
+    `<button class="tt-btn" data-cmd="table" title="Table">⊕ table</button>` +
     `<span class="tt-sep tt-sep-flex"></span>` +
     `<button class="tt-btn" data-cmd="source" title="Toggle markdown source">MD</button>`;
 
@@ -125,6 +126,37 @@ export function setupTuiPane(pane, tab, { markdown, root, savePath, saveFn, imag
     `<button class="tt-btn tt-btn-primary" id="tt-img-ok">Insert</button>` +
     `<button class="tt-btn" id="tt-img-cancel">✕</button>`;
 
+  // Link insert form (inline, below toolbar)
+  const linkForm = document.createElement('div');
+  linkForm.className = 'tiptap-link-form';
+  linkForm.hidden = true;
+  linkForm.innerHTML =
+    `<div class="tt-link-row">` +
+      `<input class="tt-input" id="tt-link-url" placeholder="URL or page path…" autocomplete="off" />` +
+      `<button class="tt-btn tt-btn-primary" id="tt-link-ok">Set link</button>` +
+      `<button class="tt-btn" id="tt-link-remove">Remove</button>` +
+      `<button class="tt-btn" id="tt-link-cancel">✕</button>` +
+    `</div>` +
+    `<div class="tt-link-pages" id="tt-link-pages" hidden></div>`;
+
+  // Table menu (floating dropdown)
+  const tableMenu = document.createElement('div');
+  tableMenu.className = 'tiptap-table-menu';
+  tableMenu.hidden = true;
+  tableMenu.innerHTML =
+    `<button class="tt-btn tt-menu-item" data-tbl="insert">Insert table (with header)</button>` +
+    `<button class="tt-btn tt-menu-item" data-tbl="insertNoHeader">Insert table (no header)</button>` +
+    `<div class="tt-menu-sep"></div>` +
+    `<button class="tt-btn tt-menu-item tt-tbl-ctx" data-tbl="addColBefore">Add column before</button>` +
+    `<button class="tt-btn tt-menu-item tt-tbl-ctx" data-tbl="addColAfter">Add column after</button>` +
+    `<button class="tt-btn tt-menu-item tt-tbl-ctx" data-tbl="addRowBefore">Add row before</button>` +
+    `<button class="tt-btn tt-menu-item tt-tbl-ctx" data-tbl="addRowAfter">Add row after</button>` +
+    `<div class="tt-menu-sep"></div>` +
+    `<button class="tt-btn tt-menu-item tt-tbl-ctx" data-tbl="deleteCol">Delete column</button>` +
+    `<button class="tt-btn tt-menu-item tt-tbl-ctx" data-tbl="deleteRow">Delete row</button>` +
+    `<button class="tt-btn tt-menu-item tt-tbl-ctx" data-tbl="deleteTable">Delete table</button>`;
+  document.body.appendChild(tableMenu);
+
   // Editor content area
   const contentEl = document.createElement('div');
   contentEl.className = 'tiptap-content';
@@ -135,7 +167,7 @@ export function setupTuiPane(pane, tab, { markdown, root, savePath, saveFn, imag
   sourceEl.hidden = true;
   sourceEl.spellcheck = false;
 
-  tipWrap.append(toolbar, imgForm, contentEl, sourceEl);
+  tipWrap.append(toolbar, imgForm, linkForm, contentEl, sourceEl);
 
   // ToC sidebar
   const tocEl = document.createElement('nav');
@@ -160,7 +192,7 @@ export function setupTuiPane(pane, tab, { markdown, root, savePath, saveFn, imag
     extensions: [
       StarterKit,
       CustomImage,
-      Link.configure({ openOnClick: false }),
+      Link.configure({ openOnClick: false, validate: href => !!href, isAllowedUri: () => true }),
       TaskList,
       TaskItem.configure({ nested: true }),
       Table.configure({ resizable: false }),
@@ -241,6 +273,7 @@ export function setupTuiPane(pane, tab, { markdown, root, savePath, saveFn, imag
 
   // ── Toolbar ───────────────────────────────────────────────────────────────
   function updateToolbar() {
+    const inTable = editor.isActive('table');
     const state = {
       h1: editor.isActive('heading', { level: 1 }),
       h2: editor.isActive('heading', { level: 2 }),
@@ -250,9 +283,13 @@ export function setupTuiPane(pane, tab, { markdown, root, savePath, saveFn, imag
       codeBlock: editor.isActive('codeBlock'), blockquote: editor.isActive('blockquote'),
       ul: editor.isActive('bulletList'), ol: editor.isActive('orderedList'),
       task: editor.isActive('taskList'),
+      table: inTable,
     };
     toolbar.querySelectorAll('[data-cmd]').forEach(b =>
       b.classList.toggle('active', !!state[b.dataset.cmd])
+    );
+    tableMenu.querySelectorAll('.tt-tbl-ctx').forEach(b =>
+      b.toggleAttribute('data-disabled', !inTable)
     );
   }
 
@@ -277,6 +314,7 @@ export function setupTuiPane(pane, tab, { markdown, root, savePath, saveFn, imag
       case 'hr':         c.setHorizontalRule().run(); break;
       case 'link':       handleLink(); break;
       case 'image':      toggleImgForm(); break;
+      case 'table':      toggleTableMenu(btn); break;
       case 'source':     toggleSource(); break;
     }
     updateToolbar();
@@ -309,6 +347,47 @@ export function setupTuiPane(pane, tab, { markdown, root, savePath, saveFn, imag
   imgForm.querySelector('#tt-img-cancel').addEventListener('click', () => { imgForm.hidden = true; });
   imgForm.querySelector('#tt-src').addEventListener('keydown', e => { if (e.key === 'Enter') insertImage(); });
 
+  // ── Table menu ────────────────────────────────────────────────────────────
+  editor.on('destroy', () => tableMenu.remove());
+
+  function toggleTableMenu(triggerBtn) {
+    if (!tableMenu.hidden) { tableMenu.hidden = true; return; }
+    updateToolbar();
+    const rect = triggerBtn.getBoundingClientRect();
+    tableMenu.style.left = rect.left + 'px';
+    tableMenu.style.top  = (rect.bottom + 4) + 'px';
+    tableMenu.hidden = false;
+  }
+
+  tableMenu.addEventListener('mousedown', e => {
+    e.preventDefault();
+    const btn = e.target.closest('[data-tbl]');
+    if (!btn || btn.hasAttribute('data-disabled')) return;
+    tableMenu.hidden = true;
+    const c = editor.chain().focus();
+    switch (btn.dataset.tbl) {
+      case 'insert':         c.insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run(); break;
+      case 'insertNoHeader': c.insertTable({ rows: 3, cols: 3, withHeaderRow: false }).run(); break;
+      case 'addColBefore': c.addColumnBefore().run(); break;
+      case 'addColAfter':  c.addColumnAfter().run(); break;
+      case 'addRowBefore': c.addRowBefore().run(); break;
+      case 'addRowAfter':  c.addRowAfter().run(); break;
+      case 'deleteCol':    c.deleteColumn().run(); break;
+      case 'deleteRow':    c.deleteRow().run(); break;
+      case 'deleteTable':  c.deleteTable().run(); break;
+    }
+    updateToolbar();
+  });
+
+  function closeTableMenuOnOutsideClick(e) {
+    if (tableMenu.hidden) return;
+    if (!tableMenu.contains(e.target) && !e.target.closest('[data-cmd="table"]')) {
+      tableMenu.hidden = true;
+    }
+  }
+  document.addEventListener('mousedown', closeTableMenuOnOutsideClick);
+  editor.on('destroy', () => document.removeEventListener('mousedown', closeTableMenuOnOutsideClick));
+
   // ── Link tooltip ──────────────────────────────────────────────────────────
   const linkTooltip = document.createElement('div');
   linkTooltip.className = 'tt-link-tooltip';
@@ -338,27 +417,90 @@ export function setupTuiPane(pane, tab, { markdown, root, savePath, saveFn, imag
     if (!btn) return;
     const href = editor.getAttributes('link').href;
     if (btn.dataset.action === 'open') {
-      window.open(href, '_blank', 'noopener');
+      if (openFileFn && !/^https?:\/\//.test(href)) openFileFn(href);
+      else window.open(href, '_blank', 'noopener');
     } else if (btn.dataset.action === 'edit') {
-      const url = prompt('URL:', href);
-      if (url !== null) {
-        if (url === '') editor.chain().focus().unsetLink().run();
-        else editor.chain().focus().setLink({ href: url }).run();
-      }
+      linkTooltip.hidden = true;
+      openLinkForm();
     } else if (btn.dataset.action === 'remove') {
       editor.chain().focus().unsetLink().run();
     }
     updateLinkTooltip();
   });
 
-  // ── Link insert (toolbar button) ──────────────────────────────────────────
-  function handleLink() {
-    const prev = editor.getAttributes('link').href ?? '';
-    const url = prompt('URL:', prev);
-    if (url === null) return;
-    if (url === '') { editor.chain().focus().unsetLink().run(); return; }
-    editor.chain().focus().setLink({ href: url }).run();
+  // ── Link insert form ──────────────────────────────────────────────────────
+  const linkInput   = linkForm.querySelector('#tt-link-url');
+  const linkPages   = linkForm.querySelector('#tt-link-pages');
+  let cachedFiles = null;
+  let savedFrom = null, savedTo = null;
+
+  function renderPageList(files, query) {
+    const q = query.toLowerCase();
+    const matches = q
+      ? files.filter(f => f.toLowerCase().includes(q) || labelForFile(f).toLowerCase().includes(q))
+      : files;
+    if (matches.length === 0) { linkPages.hidden = true; return; }
+    linkPages.innerHTML = matches.map(f =>
+      `<button class="tt-link-page-item" data-path="${f}">` +
+        `<span class="tt-link-page-label">${labelForFile(f)}</span>` +
+        `<span class="tt-link-page-path">${f}</span>` +
+      `</button>`
+    ).join('');
+    linkPages.hidden = false;
   }
+
+  function openLinkForm() {
+    ({ from: savedFrom, to: savedTo } = editor.state.selection);
+    const prev = editor.getAttributes('link').href ?? '';
+    linkInput.value = prev;
+    linkPages.hidden = true;
+    linkForm.hidden = false;
+    linkInput.focus();
+    linkInput.select();
+
+    if (!filesUrl) return;
+    const populate = files => renderPageList(files, prev);
+    if (cachedFiles) { populate(cachedFiles); return; }
+    fetch(filesUrl).then(r => r.json()).then(files => {
+      cachedFiles = files.filter(f => !f.endsWith('/'));
+      populate(cachedFiles);
+    });
+  }
+
+  function commitLink() {
+    const url = linkInput.value.trim();
+    const from = savedFrom, to = savedTo;
+    savedFrom = savedTo = null;
+    linkForm.hidden = true;
+    if (url === '') { editor.chain().focus().unsetLink().run(); return; }
+    editor.chain().focus().setTextSelection({ from, to }).setLink({ href: url }).run();
+  }
+
+  linkInput.addEventListener('input', () => {
+    if (!cachedFiles) return;
+    renderPageList(cachedFiles, linkInput.value);
+  });
+  linkInput.addEventListener('keydown', e => {
+    if (e.key === 'Enter')  { e.preventDefault(); commitLink(); }
+    if (e.key === 'Escape') { linkForm.hidden = true; editor.commands.focus(); }
+  });
+  linkPages.addEventListener('click', e => {
+    const item = e.target.closest('[data-path]');
+    if (!item) return;
+    linkInput.value = item.dataset.path;
+    commitLink();
+  });
+  linkForm.querySelector('#tt-link-ok').addEventListener('click', commitLink);
+  linkForm.querySelector('#tt-link-remove').addEventListener('click', () => {
+    linkForm.hidden = true;
+    editor.chain().focus().unsetLink().run();
+  });
+  linkForm.querySelector('#tt-link-cancel').addEventListener('click', () => {
+    linkForm.hidden = true;
+    editor.commands.focus();
+  });
+
+  function handleLink() { openLinkForm(); }
 
   // ── Source mode ───────────────────────────────────────────────────────────
   let inSourceMode = false;
@@ -918,8 +1060,16 @@ export function initEditor({
     openTabs.push({ relPath: key, tabEl: tab, paneEl: pane });
     activateTab(key);
 
-    setupTuiPane(pane, tab, { markdown, root, savePath: key, saveFn, imageBaseUrl: '' });
+    setupTuiPane(pane, tab, { markdown, root, savePath: key, saveFn, imageBaseUrl: '', openFileFn: openFile, filesUrl });
   }
+
+  function handleBeforeUnload(e) {
+    if (tabsEl.querySelector('.tab-dirty')) {
+      e.preventDefault();
+      e.returnValue = '';
+    }
+  }
+  window.addEventListener('beforeunload', handleBeforeUnload);
 
   return { openFile, reloadNav, activateTab, closeTab, openContent };
 }

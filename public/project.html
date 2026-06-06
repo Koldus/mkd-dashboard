@@ -1074,6 +1074,10 @@
             markdown: data.markdown,
             root,
             savePath: projectPath ? `${projectPath}/${relPath}` : relPath,
+            openFileFn: path => editorApi.openFile(path),
+            filesUrl: projectPath
+              ? `/api/project-files?root=${encodeURIComponent(root)}&path=${encodeURIComponent(projectPath)}`
+              : `/api/project-files?root=${encodeURIComponent(root)}`,
           });
         }
       },

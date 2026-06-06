@@ -83,7 +83,7 @@
     document.getElementById('page-title').textContent = pageTitle;
     document.title = `${pageTitle} — Workspace`;
 
-    initEditor({
+    const editorApi = initEditor({
       root, projectPath, initialFile,
       sidebarEl:      document.getElementById('project-sidebar'),
       navEl:          document.getElementById('file-nav'),
@@ -103,6 +103,10 @@
           markdown: data.markdown,
           root,
           savePath: projectPath ? `${projectPath}/${relPath}` : relPath,
+          openFileFn: path => editorApi.openFile(path),
+          filesUrl: projectPath
+            ? `/api/project-files?root=${encodeURIComponent(root)}&path=${encodeURIComponent(projectPath)}`
+            : `/api/project-files?root=${encodeURIComponent(root)}`,
         });
       },
     });
