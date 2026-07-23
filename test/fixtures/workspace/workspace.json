@@ -1,0 +1,7 @@
+{
+  "projectGroups": [
+    { "prefix": "active-features/",     "section": "## Active Features", "sub": null    },
+    { "prefix": "other-projects/",      "section": "## Other Projects",  "sub": null    },
+    { "prefix": "feature-backlog/q3/",  "section": "## Feature Backlog", "sub": "### Q3" }
+  ]
+}

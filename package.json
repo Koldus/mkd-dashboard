@@ -6,12 +6,24 @@
   "scripts": {
     "start": "node server.js",
     "work": "set WORKSPACE=work&& set PORT=3001&& node server.js",
-    "home": "set WORKSPACE=home&& set PORT=3002&& node server.js"
+    "home": "set WORKSPACE=home&& set PORT=3002&& node server.js",
+    "test": "jest"
+  },
+  "jest": {
+    "testEnvironment": "node",
+    "testPathIgnorePatterns": [
+      "/node_modules/",
+      "/test/fixtures/"
+    ]
   },
   "dependencies": {
     "@notionhq/client": "^5.20.0",
     "dotenv": "^17.4.2",
     "express": "^4.18.2",
     "marked": "^9.1.6"
+  },
+  "devDependencies": {
+    "jest": "^29.7.0",
+    "supertest": "^7.2.2"
   }
 }

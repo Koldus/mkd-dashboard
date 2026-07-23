@@ -4,18 +4,20 @@ const fs = require('fs');
 const path = require('path');
 const { marked } = require('marked');
 const { Client } = require('@notionhq/client');
+const { detectProjectReadme, insertProjectOverviewRow, parseProjectGroupsFromOverview } = require('./lib/project-helpers');
 
 const notion = new Client({ auth: process.env.NOTION_API_KEY });
 
 const app = express();
 const PORT = process.env.PORT || 3001;
 const WORKSPACE_ID = process.env.WORKSPACE || 'work';
-const registry = JSON.parse(fs.readFileSync(path.join(__dirname, 'registry.json'), 'utf8'));
+const REGISTRY_PATH = process.env.REGISTRY_PATH || path.join(__dirname, 'registry.json');
+const registry = JSON.parse(fs.readFileSync(REGISTRY_PATH, 'utf8'));
 const ws = registry.workspaces.find(w => w.id === WORKSPACE_ID);
 if (!ws) throw new Error(`Unknown workspace: ${WORKSPACE_ID}`);
-const workspaceConfig = JSON.parse(fs.readFileSync(path.join(ws.path, 'workspace.json'), 'utf8'));
-
-const REPO_ROOT = ws.path;
+// Resolve ws.path relative to the registry file so test fixtures can use relative paths.
+const REPO_ROOT = path.resolve(path.dirname(REGISTRY_PATH), ws.path);
+const workspaceConfig = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, 'workspace.json'), 'utf8'));
 const NOTION_DATA_SOURCE = ws.notionDatabaseId;
 const ALLOWED_ROOTS = new Set(ws.features);
 const PROJECT_GROUP_PREFIXES = workspaceConfig.projectGroups;
@@ -35,45 +37,12 @@ app.use(express.json());
 
 // ── Project overview helpers ────────────────────────────────────────────────
 
-// Groups that live one level deep from their prefix (group/project/README.md)
-
-function detectProjectReadme(relPath) {
-  for (const g of PROJECT_GROUP_PREFIXES) {
-    if (!relPath.startsWith(g.prefix)) continue;
-    const rest  = relPath.slice(g.prefix.length).split('/');
-    // must be exactly {folder-name}/README.md
-    if (rest.length === 2 && rest[1] === 'README.md') return { ...g, folderName: rest[0] };
-  }
-  return null;
-}
-
 function addToProjectsOverview(relPath, status, name) {
-  const match = detectProjectReadme(relPath);
-  if (!match) return;
-
   const overviewPath = path.join(REPO_ROOT, 'projects', 'README.md');
   if (!fs.existsSync(overviewPath)) return;
-
   const lines = fs.readFileSync(overviewPath, 'utf8').replace(/\r\n/g, '\n').split('\n');
-  const projectName = name || match.folderName.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
-  const newRow = `| [${projectName}](${match.prefix}${match.folderName}/README.md) | ${status} |`;
-
-  let inSection = false, inSub = match.sub === null, insertAt = -1;
-
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i].trimEnd();
-    if (line === match.section)           { inSection = true; inSub = match.sub === null; continue; }
-    if (inSection && line === match.sub)  { inSub = true; continue; }
-    if (inSection && inSub) {
-      if (line.startsWith('|'))           { insertAt = i + 1; }
-      // stop at next section/subsection heading
-      if (line.startsWith('## ') || (match.sub && line.startsWith('### '))) break;
-    }
-  }
-
-  if (insertAt === -1) return;
-  lines.splice(insertAt, 0, newRow);
-  fs.writeFileSync(overviewPath, lines.join('\n'), 'utf8');
+  const updated = insertProjectOverviewRow(lines, relPath, status, name, PROJECT_GROUP_PREFIXES);
+  if (updated) fs.writeFileSync(overviewPath, updated.join('\n'), 'utf8');
 }
 
 const README_TEMPLATE_WORK = (title, status) =>
@@ -580,7 +549,7 @@ app.post('/api/project-file', (req, res) => {
     fs.mkdirSync(path.dirname(absPath), { recursive: true });
     const heading = path.basename(relPath, '.md').split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
 
-    const projectMatch = rootName === 'projects' && detectProjectReadme(relPath);
+    const projectMatch = rootName === 'projects' && detectProjectReadme(relPath, PROJECT_GROUP_PREFIXES);
     if (projectMatch) {
       const status = 'backlog';
       const projectHeading = name || projectMatch.folderName.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
@@ -772,33 +741,8 @@ app.get('/api/project-groups', (req, res) => {
       prefix: g.prefix,
     })));
   }
-
-  const content = fs.readFileSync(overviewPath, 'utf8').replace(/\r\n/g, '\n');
-  const groups = [];
-  let cur = null;
-
-  for (const line of content.split('\n')) {
-    const h2 = line.match(/^## (.+)/);
-    if (h2) {
-      if (cur) groups.push(cur);
-      cur = { label: h2[1].trim(), prefix: null };
-      continue;
-    }
-    if (cur && cur.prefix === null) {
-      const m = line.match(/\[.*?\]\((.+?)\/[^/]+\/README\.md\)/);
-      if (m) cur.prefix = m[1] + '/';
-    }
-  }
-  if (cur) groups.push(cur);
-
-  for (const g of groups) {
-    if (g.prefix === null) {
-      g.prefix = g.label.toLowerCase()
-        .replace(/&/g, 'and').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') + '/';
-    }
-  }
-
-  res.json(groups);
+  const content = fs.readFileSync(overviewPath, 'utf8');
+  res.json(parseProjectGroupsFromOverview(content));
 });
 
 // GET /api/tasks — live data from Notion
@@ -906,6 +850,10 @@ app.get('/files/:root/*', (req, res) => {
   res.sendFile(absPath);
 });
 
-app.listen(PORT, () => {
-  console.log(`Dashboard running at http://localhost:${PORT}`);
-});
+if (require.main === module) {
+  app.listen(PORT, () => {
+    console.log(`Dashboard running at http://localhost:${PORT}`);
+  });
+}
+
+module.exports = app;
