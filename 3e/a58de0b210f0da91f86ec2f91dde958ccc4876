@@ -1,0 +1,25 @@
+public/project.html
+  s_14677d241a6acb::t_357ca25f4495c7 83,90,164-165,329-410,942-949
+server.js
+  s_14677d241a6acb::t_211d705c6bd5da 724-747
+public/index.html
+  s_14677d241a6acb::t_b3f057d4f1edec 72,207-212,284-364,378-379
+public/style.css
+  s_14677d241a6acb::t_97bf957f38ebc3 2750-2864
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.16",
+  "base_commit_sha": "3ea58de0b210f0da91f86ec2f91dde958ccc4876",
+  "prompts": {},
+  "sessions": {
+    "s_14677d241a6acb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d1f0eb4f-674f-415b-a0c3-eb6d172dbe67",
+        "model": "unknown"
+      },
+      "human_author": "Koldus <Miroslav.Koldus@gmail.com>"
+    }
+  }
+}
