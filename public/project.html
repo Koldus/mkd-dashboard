@@ -80,13 +80,14 @@
 
   <script>
     let wsActivityTypes = [];
-    fetch('/api/workspace').then(r => r.json()).then(ws => {
+    window.wsFeaturesReady = fetch('/api/workspace').then(r => r.json()).then(ws => {
       const features = new Set(ws.features);
       document.querySelectorAll('[data-feature]').forEach(el => {
         if (!features.has(el.dataset.feature)) el.style.display = 'none';
       });
       document.title = document.title.replace('Workspace', ws.name);
       wsActivityTypes = ws.activityTypes || [];
+      return features;
     });
   </script>
 
@@ -159,6 +160,8 @@
 
   <script type="module">
     import { initEditor, setupTuiPane, humanize } from './editor-core.js';
+
+    const wsFeatures = await window.wsFeaturesReady;
 
     document.getElementById('header-date').textContent =
       new Date().toLocaleDateString('en-GB', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
@@ -321,6 +324,88 @@
       }
       if (!foundPath) readmeDoc.headerLines.push(`**Worktree:** ${wtPath}`);
       if (!foundF1)   readmeDoc.headerLines.push(`**F1 Path:** ${f1path}`);
+    }
+
+    // ── Conversations widget (Slack tracker) ────────────────────────────────
+    const CONV_TYPE_LABELS   = { question: 'Question', reference: 'Reference', 'customer-request': 'Customer Request' };
+    const CONV_STATUS_LABELS = { unanswered: 'Unanswered', answered: 'Answered', saved: 'Saved', dismissed: 'Dismissed' };
+
+    async function loadConversations() {
+      const r = await fetch('/api/conversations');
+      if (!r.ok) return [];
+      return r.json();
+    }
+
+    async function saveConversations(all) {
+      await fetch('/api/conversations', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(all),
+      });
+    }
+
+    async function setConversationStatus(id, newStatus) {
+      const all = await loadConversations();
+      const entry = all.find(c => c.id === id);
+      if (!entry) return;
+      entry.status = newStatus;
+      entry.lastUpdated = new Date().toISOString();
+      await saveConversations(all);
+    }
+
+    function conversationActions(entry) {
+      if (entry.type === 'reference') {
+        return entry.status === 'dismissed'
+          ? [{ label: 'Restore', next: 'saved' }]
+          : [{ label: 'Dismiss', next: 'dismissed' }];
+      }
+      if (entry.status === 'unanswered') return [{ label: 'Mark answered', next: 'answered' }, { label: 'Dismiss', next: 'dismissed' }];
+      if (entry.status === 'answered')   return [{ label: 'Reopen', next: 'unanswered' }, { label: 'Dismiss', next: 'dismissed' }];
+      return [{ label: 'Restore', next: 'unanswered' }];
+    }
+
+    function conversationRowHTML(entry) {
+      return `<li class="conv-row" data-id="${esc(entry.id)}">` +
+        `<div class="conv-row-main">` +
+        `<div class="conv-row-badges">` +
+        `<span class="conv-badge conv-type-${esc(entry.type)}">${esc(CONV_TYPE_LABELS[entry.type] || entry.type)}</span>` +
+        `<span class="conv-badge conv-status-${esc(entry.status)}">${esc(CONV_STATUS_LABELS[entry.status] || entry.status)}</span>` +
+        `</div>` +
+        `<a class="conv-excerpt" href="${esc(entry.permalink || '#')}" target="_blank" rel="noopener noreferrer">${esc(entry.excerpt || '(no excerpt)')}</a>` +
+        `<div class="conv-meta">${esc(entry.channel || '')}${entry.author ? ' · ' + esc(entry.author) : ''}</div>` +
+        (entry.draftResponse
+          ? `<div class="conv-draft"><div class="conv-draft-label">Drafted response</div>` +
+            `<div class="conv-draft-text">${esc(entry.draftResponse)}</div>` +
+            `<button class="conv-copy-btn" data-copy="${esc(entry.draftResponse)}">Copy</button></div>`
+          : '') +
+        `</div>` +
+        `<div class="conv-row-actions">` +
+        conversationActions(entry).map(a => `<button class="links-action-btn" data-id="${esc(entry.id)}" data-next="${esc(a.next)}">${esc(a.label)}</button>`).join('') +
+        `</div></li>`;
+    }
+
+    async function renderConversationsWidget(widget, projPath) {
+      widget.innerHTML = `<div class="readme-widget-header">Conversations</div><div class="readme-widget-body conv-body">Loading…</div>`;
+      const all = await loadConversations();
+      const items = all
+        .filter(c => c.projectPath === projPath)
+        .sort((a, b) => (b.lastUpdated || '').localeCompare(a.lastUpdated || ''));
+
+      const body = widget.querySelector('.conv-body');
+      body.innerHTML = items.length
+        ? `<ul class="conv-list">${items.map(conversationRowHTML).join('')}</ul>`
+        : `<p class="proj-empty">No tracked conversations yet.</p>`;
+
+      body.querySelectorAll('.conv-row-actions [data-next]').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          await setConversationStatus(btn.dataset.id, btn.dataset.next);
+          renderConversationsWidget(widget, projPath);
+        });
+      });
+
+      body.querySelectorAll('.conv-copy-btn').forEach(btn => {
+        btn.addEventListener('click', () => navigator.clipboard.writeText(btn.dataset.copy));
+      });
     }
 
     function renderWorktreeWidget(widget, pane) {
@@ -852,6 +937,14 @@
           });
         }
         leftCol.appendChild(widget);
+      }
+
+      // Left: Conversations widget (Slack tracker) — work-mode feature, projects only
+      if (root === 'projects' && projectPath && wsFeatures.has('conversations')) {
+        const convWidget = document.createElement('div');
+        convWidget.className = 'readme-widget';
+        leftCol.appendChild(convWidget);
+        renderConversationsWidget(convWidget, projectPath);
       }
 
       // Right: Status widget

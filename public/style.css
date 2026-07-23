@@ -2747,6 +2747,121 @@ tr:hover .item-delete-btn { display: inline-block; }
   padding: 10px 12px;
 }
 
+/* Conversations widget */
+.conv-filter-bar {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.conv-quick-filter {
+  font-size: 10px;
+  color: var(--muted2);
+  background: #18181b;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 1px 8px;
+  cursor: pointer;
+  transition: color 0.1s, border-color 0.1s;
+}
+
+.conv-quick-filter:hover {
+  color: var(--text);
+  border-color: var(--muted2);
+}
+
+.conv-list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.conv-row {
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface2);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.conv-row-main {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.conv-row-badges {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.conv-badge {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 2px 7px;
+  border-radius: 999px;
+  color: #fff;
+}
+
+.conv-type-question          { background: var(--status-backlog); }
+.conv-type-reference         { background: var(--status-on-hold); }
+.conv-type-customer-request  { background: var(--status-paused); }
+
+.conv-status-unanswered { background: var(--status-backlog); }
+.conv-status-answered   { background: var(--status-active); }
+.conv-status-saved      { background: var(--status-done); }
+.conv-status-dismissed  { background: var(--status-on-hold); }
+
+.conv-excerpt {
+  color: var(--text);
+  font-size: 13px;
+  text-decoration: none;
+}
+
+.conv-excerpt:hover { text-decoration: underline; }
+
+.conv-meta {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.conv-draft {
+  margin-top: 6px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+}
+
+.conv-draft-label {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: 4px;
+}
+
+.conv-draft-text {
+  font-size: 13px;
+  color: var(--text);
+  white-space: pre-wrap;
+  margin-bottom: 6px;
+}
+
+.conv-row-actions {
+  display: flex;
+  gap: 6px;
+}
+
 .readme-status-display {
   display: inline-flex;
   align-items: center;

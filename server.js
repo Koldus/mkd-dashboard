@@ -721,6 +721,30 @@ app.put('/api/links', (req, res) => {
   }
 });
 
+// GET /api/conversations — Slack conversation tracker entries
+app.get('/api/conversations', (req, res) => {
+  if (!ALLOWED_ROOTS.has('conversations')) return res.status(403).json({ error: 'Forbidden' });
+  try {
+    const data = fs.readFileSync(path.join(REPO_ROOT, 'conversations.json'), 'utf8');
+    res.json(JSON.parse(data));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// PUT /api/conversations — persist full updated array
+app.put('/api/conversations', (req, res) => {
+  if (!ALLOWED_ROOTS.has('conversations')) return res.status(403).json({ error: 'Forbidden' });
+  try {
+    const data = req.body;
+    if (!Array.isArray(data)) return res.status(400).json({ error: 'Expected an array' });
+    fs.writeFileSync(path.join(REPO_ROOT, 'conversations.json'), JSON.stringify(data, null, 2), 'utf8');
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // GET /api/workspace — workspace identity and active features
 app.get('/api/workspace', (req, res) => {
   res.json({
