@@ -1,0 +1,39 @@
+CLAUDE.md
+  s_beafaa1bc43b04::t_d12878f1b1e24a 3-115
+lib/project-helpers.js
+  s_beafaa1bc43b04::t_a00445b2c567fb 1-103
+package.json
+  s_beafaa1bc43b04::t_7db39781dad947 9-17,24-27
+server.js
+  s_beafaa1bc43b04::t_1fdf6301523e88 7,14-15,18-20,44-45,552,744-745,853-859
+test/api-projects.test.js
+  s_beafaa1bc43b04::t_158edf63f0edc0 1-185
+test/fixtures/workspace/projects/README.md
+  s_beafaa1bc43b04::t_de4ee63cf9c294 1-21
+test/fixtures/workspace/projects/active-features/existing-project/README.md
+  s_beafaa1bc43b04::t_3b60d586b52907 1-21
+test/fixtures/workspace/workspace.json
+  s_beafaa1bc43b04::t_308490c3f5f6fc 1-7
+test/project-helpers.test.js
+  s_beafaa1bc43b04::t_9fda72bf717c9a 1-190
+public/index.html
+  s_beafaa1bc43b04::t_7b07a912120619 132
+public/project.html
+  s_beafaa1bc43b04::t_3bdc800b12de48 48
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "5caa37ba5475e1b749e29c5710b8d3fcb692e863",
+  "prompts": {},
+  "sessions": {
+    "s_beafaa1bc43b04": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "3cbc7578-4086-4c31-b5fa-b1e3a176cb9f",
+        "model": "unknown"
+      },
+      "human_author": "Koldus <Miroslav.Koldus@gmail.com>"
+    }
+  }
+}
