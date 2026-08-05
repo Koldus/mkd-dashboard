@@ -2,11 +2,10 @@ require('dotenv').config();
 const express = require('express');
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 const { marked } = require('marked');
-const { Client } = require('@notionhq/client');
 const { detectProjectReadme, insertProjectOverviewRow, parseProjectGroupsFromOverview } = require('./lib/project-helpers');
-
-const notion = new Client({ auth: process.env.NOTION_API_KEY });
+const { readTasks, writeTasks, splitTasks } = require('./lib/task-store');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -18,7 +17,6 @@ if (!ws) throw new Error(`Unknown workspace: ${WORKSPACE_ID}`);
 // Resolve ws.path relative to the registry file so test fixtures can use relative paths.
 const REPO_ROOT = path.resolve(path.dirname(REGISTRY_PATH), ws.path);
 const workspaceConfig = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, 'workspace.json'), 'utf8'));
-const NOTION_DATA_SOURCE = ws.notionDatabaseId;
 const ALLOWED_ROOTS = new Set(ws.features);
 const PROJECT_GROUP_PREFIXES = workspaceConfig.projectGroups;
 const WORKTREE_DIRS = ws.worktreeDirs || [];
@@ -49,15 +47,10 @@ const README_TEMPLATE_WORK = (title, status) =>
 `# ${title}
 
 **Status:** ${status}
-**Notion Project:** ${title}
 
 ## Goal
 
 ## Context
-
-## To-Do
-
-- [ ]
 
 ## Documentation
 
@@ -78,13 +71,8 @@ const README_TEMPLATE_HOME = (title, status) =>
 `# ${title}
 
 **Status:** ${status}
-**Notion Project:** ${title}
 
 ## Goal
-
-## To-Do
-
-- [ ]
 
 ## Shopping List
 
@@ -114,7 +102,7 @@ function parseProjects() {
     }
 
     // Match table rows: | [Name](path) | status |
-    const rowMatch = line.match(/^\|\s*\[([^\]]+)\]\(([^)]+)\)\s*\|\s*(\S+)\s*\|/);
+    const rowMatch = line.match(/^\|\s*\[([^\]]+)\]\(([^)]+)\)\s*\|\s*([^|]+?)\s*\|/);
     if (rowMatch && currentCategory) {
       projects.push({
         name: rowMatch[1],
@@ -258,7 +246,7 @@ function collectMdFiles(dir, base) {
       } else {
         results.push(rel + '/'); // empty directory marker
       }
-    } else if (entry.isFile() && entry.name.endsWith('.md')) {
+    } else if (entry.isFile() && entry.name.toLowerCase().endsWith('.md')) {
       results.push(rel);
     }
   }
@@ -538,7 +526,7 @@ app.post('/api/meeting/add-decision', (req, res) => {
 app.post('/api/project-file', (req, res) => {
   const { root: rootName, path: relPath, name } = req.body;
   if (!ALLOWED_ROOTS.has(rootName)) return res.status(403).json({ error: 'Forbidden' });
-  if (!relPath || !relPath.endsWith('.md')) return res.status(400).json({ error: 'Path must end with .md' });
+  if (!relPath || !relPath.toLowerCase().endsWith('.md')) return res.status(400).json({ error: 'Path must end with .md' });
 
   const sectionRoot = getSectionRoot(rootName);
   const absPath = path.resolve(sectionRoot, relPath);
@@ -569,7 +557,7 @@ app.post('/api/project-file', (req, res) => {
 app.delete('/api/project-file', (req, res) => {
   const { root: rootName, path: relPath } = req.body;
   if (!ALLOWED_ROOTS.has(rootName)) return res.status(403).json({ error: 'Forbidden' });
-  if (!relPath || !relPath.endsWith('.md')) return res.status(400).json({ error: 'Only .md files can be deleted' });
+  if (!relPath || !relPath.toLowerCase().endsWith('.md')) return res.status(400).json({ error: 'Only .md files can be deleted' });
 
   const sectionRoot = getSectionRoot(rootName);
   const absPath = path.resolve(sectionRoot, relPath);
@@ -588,7 +576,7 @@ app.delete('/api/project-file', (req, res) => {
 app.put('/api/project-file', (req, res) => {
   const { root: rootName, path: relPath, content } = req.body;
   if (!ALLOWED_ROOTS.has(rootName)) return res.status(403).json({ error: 'Forbidden' });
-  if (!relPath || !relPath.endsWith('.md')) return res.status(400).json({ error: 'Path must end with .md' });
+  if (!relPath || !relPath.toLowerCase().endsWith('.md')) return res.status(400).json({ error: 'Path must end with .md' });
 
   const sectionRoot = getSectionRoot(rootName);
   const absPath = path.resolve(sectionRoot, relPath);
@@ -686,7 +674,7 @@ app.post('/api/project-file/move', (req, res) => {
 
   if (!fromAbs.startsWith(sectionRoot + path.sep)) return res.status(403).json({ error: 'Forbidden' });
   if (!toAbs.startsWith(sectionRoot + path.sep))   return res.status(403).json({ error: 'Forbidden' });
-  if (!fromAbs.endsWith('.md')) return res.status(400).json({ error: 'Only .md files can be moved' });
+  if (!fromAbs.toLowerCase().endsWith('.md')) return res.status(400).json({ error: 'Only .md files can be moved' });
   if (!fs.existsSync(fromAbs)) return res.status(404).json({ error: 'Source not found' });
   if (fs.existsSync(toAbs))    return res.status(409).json({ error: 'Destination already exists' });
 
@@ -769,69 +757,37 @@ app.get('/api/project-groups', (req, res) => {
   res.json(parseProjectGroupsFromOverview(content));
 });
 
-// GET /api/tasks — live data from Notion
-const TODAY_STATUSES   = new Set(['In progress', 'Today']);
-const IGNORED_STATUSES = new Set(['Done']);
-
-const mapPage = (page) => ({
-  id: page.id,
-  title: page.properties['Name']?.title[0]?.plain_text ?? '(untitled)',
-  status: page.properties['Status']?.status?.name ?? null,
-  project: page.properties['Project']?.select?.name ?? null,
-  jobType: page.properties['Job Type']?.select?.name ?? null,
-  activity: (page.properties['Activity']?.multi_select ?? []).map(a => a.name),
-  folder: page.properties['Folder']?.select?.name ?? null,
-  url: page.url,
-});
-
-app.get('/api/tasks', async (req, res) => {
-  if (!process.env.NOTION_API_KEY) {
-    console.log('[tasks] NOTION_API_KEY not set — returning disconnected');
-    return res.json({ connected: false });
-  }
-
-  console.log('[tasks] fetching from Notion...');
+// GET /api/tasks — local tasks.json, optionally filtered by project
+app.get('/api/tasks', (req, res) => {
   try {
-    const response = await notion.dataSources.query({
-      data_source_id: NOTION_DATA_SOURCE,
-      page_size: 100,
-    });
-
-    console.log(`[tasks] got ${response.results.length} pages`);
-
-    const projectFilter = req.query.project || null;
-
-    let tasks = response.results.map(mapPage).filter(t => t.status && !IGNORED_STATUSES.has(t.status));
-    if (projectFilter) tasks = tasks.filter(t => t.project === projectFilter);
-    const today   = tasks.filter(t => TODAY_STATUSES.has(t.status));
-    const backlog = tasks.filter(t => !TODAY_STATUSES.has(t.status));
-
-    console.log(`[tasks] today=${today.length} backlog=${backlog.length}`);
+    const tasks = readTasks(REPO_ROOT);
+    const { today, backlog } = splitTasks(tasks, req.query.project || null);
     res.json({ connected: true, today, backlog });
   } catch (err) {
-    console.error('[tasks] Notion error:', err.message);
+    console.error('[tasks] read error:', err.message);
     res.status(500).json({ connected: false, error: err.message });
   }
 });
 
-// POST /api/tasks — create a new task in Notion
-app.post('/api/tasks', async (req, res) => {
-  const { title, project, status, jobType, activity, folder } = req.body;
+// POST /api/tasks — create a new task
+app.post('/api/tasks', (req, res) => {
+  const { title, project, status, activity } = req.body;
   if (!title) return res.status(400).json({ error: 'title required' });
   try {
-    const properties = {
-      Name: { title: [{ text: { content: title } }] },
+    const tasks = readTasks(REPO_ROOT);
+    const now = new Date().toISOString();
+    const task = {
+      id: crypto.randomUUID(),
+      title,
+      status: status || 'Backlog',
+      project: project || null,
+      activity: activity || [],
+      createdAt: now,
+      updatedAt: now,
     };
-    if (project)          properties['Project']  = { select: { name: project } };
-    if (status)           properties['Status']   = { status: { name: status } };
-    if (jobType)          properties['Job Type'] = { select: { name: jobType } };
-    if (activity?.length) properties['Activity'] = { multi_select: activity.map(a => ({ name: a })) };
-    if (folder)           properties['Folder']   = { select: { name: folder } };
-    const page = await notion.pages.create({
-      parent: { data_source_id: NOTION_DATA_SOURCE },
-      properties,
-    });
-    res.json({ ok: true, task: mapPage(page) });
+    tasks.push(task);
+    writeTasks(REPO_ROOT, tasks);
+    res.json({ ok: true, task });
   } catch (err) {
     console.error('[tasks] create error:', err.message);
     res.status(500).json({ error: err.message });
@@ -839,17 +795,18 @@ app.post('/api/tasks', async (req, res) => {
 });
 
 // PUT /api/tasks/:id — update a task
-app.put('/api/tasks/:id', async (req, res) => {
-  const { title, status, project, jobType, activity, folder } = req.body;
+app.put('/api/tasks/:id', (req, res) => {
+  const { title, status, project, activity } = req.body;
   try {
-    const properties = {};
-    if (title)               properties['Name']     = { title: [{ text: { content: title } }] };
-    if (status)              properties['Status']   = { status: { name: status } };
-    if (project !== undefined)  properties['Project']  = project ? { select: { name: project } } : { select: null };
-    if (jobType !== undefined)  properties['Job Type'] = jobType ? { select: { name: jobType } } : { select: null };
-    if (folder !== undefined)   properties['Folder']   = folder  ? { select: { name: folder  } } : { select: null };
-    if (activity !== undefined) properties['Activity'] = { multi_select: (activity || []).map(a => ({ name: a })) };
-    await notion.pages.update({ page_id: req.params.id, properties });
+    const tasks = readTasks(REPO_ROOT);
+    const task = tasks.find(t => t.id === req.params.id);
+    if (!task) return res.status(404).json({ error: 'Task not found' });
+    if (title !== undefined)    task.title    = title;
+    if (status !== undefined)   task.status   = status;
+    if (project !== undefined)  task.project  = project || null;
+    if (activity !== undefined) task.activity = activity || [];
+    task.updatedAt = new Date().toISOString();
+    writeTasks(REPO_ROOT, tasks);
     res.json({ ok: true });
   } catch (err) {
     console.error('[tasks] update error:', err.message);

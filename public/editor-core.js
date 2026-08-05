@@ -1063,6 +1063,39 @@ export function initEditor({
     setupTuiPane(pane, tab, { markdown, root, savePath: key, saveFn, imageBaseUrl: '', openFileFn: openFile, filesUrl });
   }
 
+  // Opens a tab/pane not backed by a markdown file — the caller renders the pane's
+  // content itself (e.g. a Kanban board). Participates in the same tab bookkeeping
+  // (activateTab/closeTab) as openFile/openContent.
+  function openCustomPane(key, label, renderFn, { permanent = false } = {}) {
+    const existing = openTabs.find(t => t.relPath === key);
+    if (existing) { activateTab(key); return; }
+
+    const tab = document.createElement('button');
+    tab.className = 'editor-tab' + (permanent ? ' editor-tab-permanent' : '');
+    tab.dataset.file = key;
+    tab.innerHTML = permanent
+      ? `<span class="editor-tab-label">${label}</span>`
+      : `<span class="editor-tab-label">${label}</span>` +
+        `<span class="editor-tab-close" title="Close">&#x2715;</span>`;
+
+    if (!permanent) {
+      tab.querySelector('.editor-tab-close').addEventListener('click', e => {
+        e.stopPropagation();
+        closeTab(key);
+      });
+    }
+    tab.addEventListener('click', () => activateTab(key));
+
+    const pane = document.createElement('div');
+    pane.className = 'editor-pane';
+
+    tabsEl.appendChild(tab);
+    contentEl.appendChild(pane);
+    openTabs.push({ relPath: key, tabEl: tab, paneEl: pane });
+
+    renderFn(pane);
+  }
+
   function handleBeforeUnload(e) {
     if (tabsEl.querySelector('.tab-dirty')) {
       e.preventDefault();
@@ -1071,5 +1104,5 @@ export function initEditor({
   }
   window.addEventListener('beforeunload', handleBeforeUnload);
 
-  return { openFile, reloadNav, activateTab, closeTab, openContent };
+  return { openFile, reloadNav, activateTab, closeTab, openContent, openCustomPane };
 }

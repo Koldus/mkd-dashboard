@@ -50,26 +50,14 @@
         </label>
         <label class="modal-field">
           <span class="modal-label">Project</span>
-          <input type="text" id="task-modal-project" class="modal-input" list="task-project-options" autocomplete="off" />
-          <datalist id="task-project-options"></datalist>
-        </label>
-        <label class="modal-field">
-          <span class="modal-label">Job Type</span>
-          <select id="task-modal-jobtype" class="modal-input">
-            <option value="">—</option>
-            <option>Day - manual</option>
-            <option>Night - automated</option>
+          <select id="task-modal-project" class="modal-input">
+            <option value="">&mdash; none &mdash;</option>
           </select>
         </label>
         <div class="modal-field">
           <span class="modal-label">Activity</span>
           <div class="modal-pills" id="task-modal-activity"></div>
         </div>
-        <label class="modal-field">
-          <span class="modal-label">Folder</span>
-          <input type="text" id="task-modal-folder" class="modal-input" list="task-folder-options" autocomplete="off" placeholder="optional" />
-          <datalist id="task-folder-options"></datalist>
-        </label>
       </div>
       <div class="modal-actions">
         <button class="modal-btn" id="task-modal-cancel">Cancel</button>
@@ -118,27 +106,6 @@
         </div>
       </div>
 
-      <div class="proj-hresize" id="sidebar-hresize"></div>
-
-      <div class="proj-panel" id="tasks-panel">
-        <div class="proj-panel-header">
-          Tasks
-          <div style="display:flex;align-items:center;gap:4px;">
-            <select id="task-status-filter" class="task-filter-select task-filter-select--small">
-              <option value="">all</option>
-            </select>
-            <select id="task-activity-filter" class="task-filter-select task-filter-select--small">
-              <option value="">all</option>
-            </select>
-            <button class="icon-btn" id="task-sort-btn" title="Sort by status">↕</button>
-            <button class="icon-btn" id="task-new-btn" title="New task">+</button>
-          </div>
-        </div>
-        <div class="proj-panel-body" id="tasks-body">
-          <p class="proj-empty">Loading…</p>
-        </div>
-      </div>
-
     </aside>
 
     <!-- Vertical resize handle between sidebar and editor -->
@@ -160,6 +127,7 @@
 
   <script type="module">
     import { initEditor, setupTuiPane, humanize } from './editor-core.js';
+    import { renderKanbanBoard } from './kanban.js';
 
     const wsFeatures = await window.wsFeaturesReady;
 
@@ -271,7 +239,6 @@
     }
 
     const LINK_SECTIONS    = new Set(['Documentation', 'Links & Resources', 'Shopping List']);
-    const TODO_SECTION     = 'To-Do';
     const STATUS_VALUES    = ['active', 'on hold', 'paused', 'backlog', 'done'];
 
     function getReadmeStatus() {
@@ -609,20 +576,6 @@
       return groups;
     }
 
-    function parseTodoSection(lines) {
-      const groups = [];
-      let cur = { name: null, items: [] };
-      for (const raw of lines) {
-        const h3 = raw.match(/^### (.+)/);
-        if (h3) { groups.push(cur); cur = { name: h3[1].trim(), items: [] }; continue; }
-        const item = raw.match(/^\s*- \[([ xX])\] (.+)/);
-        if (item) cur.items.push({ text: item[2].trim(), checked: item[1].toLowerCase() === 'x' });
-      }
-      groups.push(cur);
-      // always keep at least one group; drop empty unnamed ones only when others exist
-      return groups.length === 1 ? groups : groups.filter(g => g.name !== null || g.items.length > 0);
-    }
-
     function parseReadme(markdown) {
       const allLines = markdown.split('\n');
       const headerLines = [];
@@ -650,7 +603,6 @@
         headerLines,
         sections: sections.map(s => {
           if (LINK_SECTIONS.has(s.name)) return { type: 'links', name: s.name, groups: parseLinkSection(s.lines) };
-          if (s.name === TODO_SECTION)    return { type: 'todo',  name: s.name, groups: parseTodoSection(s.lines) };
           return { type: 'prose', name: s.name, lines: s.lines };
         }),
       };
@@ -676,12 +628,6 @@
         parts.push(`\n## ${s.name}\n`);
         if (s.type === 'prose') {
           parts.push(s.lines.join('\n'));
-        } else if (s.type === 'todo') {
-          for (const g of s.groups) {
-            if (g.name !== null) parts.push(`\n### ${g.name}\n`);
-            if (g.items.length) parts.push('\n' + g.items.map(i => `- [${i.checked ? 'x' : ' '}] ${i.text}`).join('\n'));
-          }
-          parts.push('');
         } else {
           for (const g of s.groups) {
             if (g.heading !== null) parts.push(`\n### ${g.heading}\n`);
@@ -716,165 +662,6 @@
         `</div></li>`;
     }
 
-    function renderTodoWidget(sec, pane) {
-      const widget = document.createElement('div');
-      widget.className = 'readme-widget';
-      widget.innerHTML = `<div class="readme-widget-header">${esc(sec.name)}</div>`;
-      const body = document.createElement('div');
-      body.className = 'readme-todo-body';
-
-      sec.groups.forEach((group, gi) => {
-        if (group.name !== null) {
-          const headingEl = document.createElement('div');
-          headingEl.className = 'meeting-section-heading';
-          headingEl.innerHTML =
-            `<span class="heading-text">${esc(group.name)}</span>` +
-            `<span class="heading-controls">` +
-            `<button class="heading-delete-btn" data-gi="${gi}" title="Delete section">×</button>` +
-            `</span>`;
-          body.appendChild(headingEl);
-        }
-
-        group.items.forEach((item, ii) => {
-          const taskEl = document.createElement('div');
-          taskEl.className = 'meeting-task';
-          taskEl.innerHTML =
-            `<input type="checkbox" ${item.checked ? 'checked' : ''} data-gi="${gi}" data-ii="${ii}" />` +
-            `<span class="task-text">${esc(item.text)}</span>` +
-            `<span class="task-controls"><button class="item-delete-btn" data-gi="${gi}" data-ii="${ii}">×</button></span>`;
-          body.appendChild(taskEl);
-        });
-
-        const addRow = document.createElement('div');
-        addRow.className = 'add-item-row';
-        addRow.innerHTML =
-          `<button class="add-item-btn" data-gi="${gi}">+ Add item</button>` +
-          `<input class="add-item-input" placeholder="New item…" data-gi="${gi}" />`;
-        body.appendChild(addRow);
-      });
-
-      const addSecRow = document.createElement('div');
-      addSecRow.className = 'add-subsection-row';
-      addSecRow.innerHTML =
-        `<button class="add-subsection-btn">+ Add section</button>` +
-        `<input class="add-subsection-input" placeholder="Section name…" />`;
-      body.appendChild(addSecRow);
-
-      widget.appendChild(body);
-      bindTodoEvents(widget, sec, pane);
-      return widget;
-    }
-
-    function bindTodoEvents(widget, sec, pane) {
-      // Double-click task text to edit inline
-      widget.querySelectorAll('.task-text').forEach(span => {
-        span.addEventListener('dblclick', () => {
-          const taskEl = span.closest('.meeting-task');
-          const cb     = taskEl.querySelector('input[type="checkbox"]');
-          const gi = parseInt(cb.dataset.gi), ii = parseInt(cb.dataset.ii);
-          const current = span.textContent;
-          const input = document.createElement('input');
-          input.type = 'text'; input.value = current; input.className = 'inline-edit-input';
-          span.replaceWith(input); input.focus(); input.select();
-          let saved = false;
-          const save = async () => {
-            if (saved) return; saved = true;
-            const newText = input.value.trim();
-            if (newText && newText !== current) {
-              sec.groups[gi].items[ii].text = newText;
-              await saveReadme();
-            }
-            renderReadme(pane);
-          };
-          input.addEventListener('keydown', e => {
-            if (e.key === 'Enter')  { e.preventDefault(); save(); }
-            if (e.key === 'Escape') { saved = true; renderReadme(pane); }
-          });
-          input.addEventListener('blur', save);
-        });
-      });
-
-      // Toggle checkbox — no re-render needed, just save
-      widget.querySelectorAll('input[type="checkbox"]').forEach(cb => {
-        cb.addEventListener('change', () => {
-          sec.groups[parseInt(cb.dataset.gi)].items[parseInt(cb.dataset.ii)].checked = cb.checked;
-          saveReadme();
-        });
-      });
-
-      // Delete item
-      widget.querySelectorAll('.item-delete-btn').forEach(btn => {
-        btn.addEventListener('click', () => {
-          sec.groups[parseInt(btn.dataset.gi)].items.splice(parseInt(btn.dataset.ii), 1);
-          saveReadme().then(() => renderReadme(pane));
-        });
-      });
-
-      // Delete section heading
-      widget.querySelectorAll('.heading-delete-btn').forEach(btn => {
-        btn.addEventListener('click', () => {
-          const g = sec.groups[parseInt(btn.dataset.gi)];
-          if (!confirm(`Delete section "${g.name}" and all its items?`)) return;
-          sec.groups.splice(parseInt(btn.dataset.gi), 1);
-          if (sec.groups.length === 0) sec.groups.push({ name: null, items: [] });
-          saveReadme().then(() => renderReadme(pane));
-        });
-      });
-
-      // Add item: show input
-      widget.querySelectorAll('.add-item-btn').forEach(btn => {
-        btn.addEventListener('click', () => {
-          btn.style.display = 'none';
-          const input = btn.nextElementSibling;
-          input.style.display = 'block';
-          input.focus();
-        });
-      });
-
-      // Add item: commit on Enter / cancel on Escape / save on blur
-      widget.querySelectorAll('.add-item-input').forEach(input => {
-        let done = false;
-        const commit = async () => {
-          if (done) return; done = true;
-          const text = input.value.trim();
-          if (text) {
-            sec.groups[parseInt(input.dataset.gi)].items.push({ text, checked: false });
-            await saveReadme();
-          }
-          renderReadme(pane);
-        };
-        input.addEventListener('keydown', e => {
-          if (e.key === 'Enter')  { e.preventDefault(); commit(); }
-          if (e.key === 'Escape') { done = true; renderReadme(pane); }
-        });
-        input.addEventListener('blur', commit);
-      });
-
-      // Add section: show input
-      const addSecBtn   = widget.querySelector('.add-subsection-btn');
-      const addSecInput = widget.querySelector('.add-subsection-input');
-      addSecBtn.addEventListener('click', () => {
-        addSecBtn.style.display = 'none';
-        addSecInput.style.display = 'block';
-        addSecInput.focus();
-      });
-      let secDone = false;
-      const commitSection = async () => {
-        if (secDone) return; secDone = true;
-        const name = addSecInput.value.trim();
-        if (name) {
-          sec.groups.push({ name, items: [] });
-          await saveReadme();
-        }
-        renderReadme(pane);
-      };
-      addSecInput.addEventListener('keydown', e => {
-        if (e.key === 'Enter')  { e.preventDefault(); commitSection(); }
-        if (e.key === 'Escape') { secDone = true; renderReadme(pane); }
-      });
-      addSecInput.addEventListener('blur', commitSection);
-    }
-
     function renderReadme(pane) {
       pane.innerHTML = '';
 
@@ -888,54 +675,49 @@
       // Left: all non-link sections in document order
       for (const sec of readmeDoc.sections) {
         if (sec.type === 'links') continue;
-        let widget;
-        if (sec.type === 'todo') {
-          widget = renderTodoWidget(sec, pane);
-        } else {
-          widget = document.createElement('div');
-          widget.className = 'readme-widget';
-          widget.innerHTML =
-            `<div class="readme-widget-header">${esc(sec.name)}` +
-            `<button class="readme-edit-btn">Edit</button></div>`;
+        const widget = document.createElement('div');
+        widget.className = 'readme-widget';
+        widget.innerHTML =
+          `<div class="readme-widget-header">${esc(sec.name)}` +
+          `<button class="readme-edit-btn">Edit</button></div>`;
 
-          const proseBody = document.createElement('div');
-          proseBody.className = 'readme-widget-body prose';
-          proseBody.innerHTML = sectionHtmlMap[sec.name] || `<p class="proj-empty">—</p>`;
-          widget.appendChild(proseBody);
+        const proseBody = document.createElement('div');
+        proseBody.className = 'readme-widget-body prose';
+        proseBody.innerHTML = sectionHtmlMap[sec.name] || `<p class="proj-empty">—</p>`;
+        widget.appendChild(proseBody);
 
-          const editArea = document.createElement('div');
-          editArea.className = 'readme-prose-edit';
+        const editArea = document.createElement('div');
+        editArea.className = 'readme-prose-edit';
+        editArea.hidden = true;
+        editArea.innerHTML =
+          `<textarea class="readme-prose-textarea"></textarea>` +
+          `<div class="readme-prose-actions">` +
+          `<button class="link-save-btn">Save</button>` +
+          `<button class="link-cancel-btn">Cancel</button>` +
+          `</div>`;
+        widget.appendChild(editArea);
+
+        widget.querySelector('.readme-edit-btn').addEventListener('click', () => {
+          proseBody.hidden = true;
+          editArea.hidden = false;
+          editArea.querySelector('textarea').value = sec.lines.join('\n').trim();
+          editArea.querySelector('textarea').focus();
+        });
+
+        editArea.querySelector('.link-save-btn').addEventListener('click', async () => {
+          const newText = editArea.querySelector('textarea').value;
+          sec.lines = newText ? newText.split('\n') : [''];
+          await saveReadme();
+          const mdPath = projectPath ? `${projectPath}/README.md` : 'README.md';
+          const refreshed = await fetch(`/api/md?root=${encodeURIComponent(root)}&path=${encodeURIComponent(mdPath)}`).then(r => r.json());
+          sectionHtmlMap = extractSectionHtml(refreshed.html);
+          renderReadme(pane);
+        });
+
+        editArea.querySelector('.link-cancel-btn').addEventListener('click', () => {
+          proseBody.hidden = false;
           editArea.hidden = true;
-          editArea.innerHTML =
-            `<textarea class="readme-prose-textarea"></textarea>` +
-            `<div class="readme-prose-actions">` +
-            `<button class="link-save-btn">Save</button>` +
-            `<button class="link-cancel-btn">Cancel</button>` +
-            `</div>`;
-          widget.appendChild(editArea);
-
-          widget.querySelector('.readme-edit-btn').addEventListener('click', () => {
-            proseBody.hidden = true;
-            editArea.hidden = false;
-            editArea.querySelector('textarea').value = sec.lines.join('\n').trim();
-            editArea.querySelector('textarea').focus();
-          });
-
-          editArea.querySelector('.link-save-btn').addEventListener('click', async () => {
-            const newText = editArea.querySelector('textarea').value;
-            sec.lines = newText ? newText.split('\n') : [''];
-            await saveReadme();
-            const mdPath = projectPath ? `${projectPath}/README.md` : 'README.md';
-            const refreshed = await fetch(`/api/md?root=${encodeURIComponent(root)}&path=${encodeURIComponent(mdPath)}`).then(r => r.json());
-            sectionHtmlMap = extractSectionHtml(refreshed.html);
-            renderReadme(pane);
-          });
-
-          editArea.querySelector('.link-cancel-btn').addEventListener('click', () => {
-            proseBody.hidden = false;
-            editArea.hidden = true;
-          });
-        }
+        });
         leftCol.appendChild(widget);
       }
 
@@ -1152,17 +934,13 @@
       newFolderRow:   document.getElementById('new-folder-row'),
       newFolderInput: document.getElementById('new-folder-input'),
       vResizeHandle:  document.getElementById('col-resize'),
-      hResizeHandle:  document.getElementById('sidebar-hresize'),
-      hResizePanel:   document.getElementById('files-panel'),
       onOpenPane(relPath, data, tab, pane, isPermanent) {
         if (isPermanent) {
           pane.classList.add('readme-view');
           readmeDoc      = parseReadme(data.markdown);
           sectionHtmlMap = extractSectionHtml(data.html);
           renderReadme(pane);
-          const npLine = readmeDoc.headerLines.find(l => /^\*\*Notion Project:\*\*/.test(l));
-          const notionProject = npLine ? npLine.replace(/^\*\*Notion Project:\*\*\s*/, '').trim() : null;
-          loadProjectTasks(notionProject);
+          editorApi.openCustomPane('__tasks__', 'Tasks', tasksPane => renderTasksPane(tasksPane, projectPath), { permanent: true });
         } else {
           setupTuiPane(pane, tab, {
             markdown: data.markdown,
@@ -1178,156 +956,61 @@
       autoOpenReadme: root !== 'f1',
     });
 
-    if (root === 'f1') loadProjectTasks(null);
-
-    // ── Tasks ───────────────────────────────────────────────────────────────────
-    const STATUS_SORT_ORDER = ['Today', 'In progress', 'This Week', 'Plan soon', 'Backlog', 'On Hold'];
-    let currentNotionProject = null;
-    let taskById = {};
-    let allProjectTasks = [];
-    let taskSortByStatus = false;
-
-    function renderTaskItem(t) {
-      const slug = (t.status ?? '').toLowerCase().replace(/\s+/g, '-');
-      const acts = (t.activity ?? []).map(a => `<span class="task-badge task-badge-activity">${esc(a)}</span>`).join('');
-      return `<div class="proj-task-item" data-id="${esc(t.id)}">` +
-        `<a class="proj-task-title" href="${esc(t.url)}" target="_blank" rel="noopener">${esc(t.title)}</a>` +
-        `<div class="proj-task-row">` +
-        `<span class="proj-task-status proj-task-status--${slug}">${esc(t.status ?? '')}</span>` +
-        (acts ? `<div class="proj-task-badges">${acts}</div>` : '') +
-        `<button class="proj-task-edit-btn" data-id="${esc(t.id)}" title="Edit">✎</button>` +
-        `</div>` +
-        `</div>`;
-    }
-
-    function renderTaskList() {
-      const body = document.getElementById('tasks-body');
-      const act    = document.getElementById('task-activity-filter').value;
-      const status = document.getElementById('task-status-filter').value;
-
-      let visible = allProjectTasks;
-      if (act)    visible = visible.filter(t => Array.isArray(t.activity) && t.activity.includes(act));
-      if (status) visible = visible.filter(t => t.status === status);
-
-      if (taskSortByStatus) {
-        visible = [...visible].sort((a, b) => {
-          const ai = STATUS_SORT_ORDER.indexOf(a.status ?? '');
-          const bi = STATUS_SORT_ORDER.indexOf(b.status ?? '');
-          return (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi);
-        });
-      }
-
-      if (visible.length === 0) {
-        body.innerHTML = '<p class="proj-empty">No open tasks</p>';
-        return;
-      }
-
-      const hasFolders = visible.some(t => t.folder);
-      if (!hasFolders) {
-        body.innerHTML = visible.map(renderTaskItem).join('');
-        return;
-      }
-
-      // Group by folder; ungrouped tasks float to top
-      const grouped = new Map();
-      const ungrouped = [];
-      for (const t of visible) {
-        if (t.folder) {
-          if (!grouped.has(t.folder)) grouped.set(t.folder, []);
-          grouped.get(t.folder).push(t);
-        } else {
-          ungrouped.push(t);
-        }
-      }
-
-      let html = ungrouped.map(renderTaskItem).join('');
-      for (const [folderName, tasks] of grouped) {
-        html +=
-          `<div class="folder-item">` +
-          `<div class="folder-header">` +
-          `<span class="folder-chevron"></span>` +
-          `<span class="folder-name">${esc(folderName)}</span>` +
-          `<span class="folder-count" style="margin-left:auto;font-size:11px;color:var(--muted2);padding-right:4px;">${tasks.length}</span>` +
-          `</div>` +
-          `<div class="folder-children">` +
-          tasks.map(renderTaskItem).join('') +
-          `</div>` +
-          `</div>`;
-      }
-
-      body.innerHTML = html;
-      body.querySelectorAll('.folder-header').forEach(header => {
-        header.addEventListener('click', () => {
-          const children = header.nextElementSibling;
-          const chevron  = header.querySelector('.folder-chevron');
-          children.classList.toggle('collapsed');
-          chevron.classList.toggle('collapsed');
-        });
-      });
-    }
-
-    function loadProjectTasks(notionProject) {
-      currentNotionProject = notionProject;
-      const url = notionProject
-        ? `/api/tasks?project=${encodeURIComponent(notionProject)}`
-        : '/api/tasks';
-      const body = document.getElementById('tasks-body');
-      body.innerHTML = '<p class="proj-empty">Loading…</p>';
-      fetch(url)
-        .then(r => r.json())
-        .then(data => {
-          if (!data.connected) {
-            body.innerHTML = '<p class="proj-empty">Tasks unavailable</p>';
-            return;
-          }
-          allProjectTasks = [...(data.today ?? []), ...(data.backlog ?? [])];
-          taskById = Object.fromEntries(allProjectTasks.map(t => [t.id, t]));
-          // Populate project datalist from unique project names in loaded tasks
-          const projects = [...new Set(allProjectTasks.map(t => t.project).filter(Boolean))];
-          document.getElementById('task-project-options').innerHTML =
-            projects.map(p => `<option value="${p}"></option>`).join('');
-          // Populate folder datalist
-          const folders = [...new Set(allProjectTasks.map(t => t.folder).filter(Boolean))];
-          document.getElementById('task-folder-options').innerHTML =
-            folders.map(f => `<option value="${f}"></option>`).join('');
-          // Populate status filter from unique statuses in loaded tasks
-          const statSel = document.getElementById('task-status-filter');
-          const prevStat = statSel.value;
-          const statuses = STATUS_SORT_ORDER.filter(s => allProjectTasks.some(t => t.status === s));
-          statSel.innerHTML = '<option value="">all</option>' +
-            statuses.map(s => `<option value="${s}">${s}</option>`).join('');
-          if (prevStat) statSel.value = prevStat;
-          // Populate activity filter
-          const actSel = document.getElementById('task-activity-filter');
-          const prevAct = actSel.value;
-          actSel.innerHTML = '<option value="">all</option>' +
-            wsActivityTypes.map(a => `<option value="${a}">${a}</option>`).join('');
-          if (prevAct) actSel.value = prevAct;
-          renderTaskList();
-        })
-        .catch(() => {
-          body.innerHTML = '<p class="proj-empty">Tasks unavailable</p>';
-        });
-    }
+    if (root === 'f1') editorApi.openCustomPane('__tasks__', 'Tasks', tasksPane => renderTasksPane(tasksPane, null), { permanent: true });
 
     document.querySelectorAll('.files-tab').forEach(btn => {
       btn.addEventListener('click', () => { activeFileTab = btn.dataset.tab; refreshFilesTabs(); });
     });
 
-    document.getElementById('task-activity-filter').addEventListener('change', renderTaskList);
-    document.getElementById('task-status-filter').addEventListener('change', renderTaskList);
+    // ── Tasks tab ─────────────────────────────────────────────────────────────
+    let taskById = {};
+    let tasksData = null;
+    let currentProjectFilter = null;
+    let tasksBoardEl = null;
 
-    document.getElementById('task-sort-btn').addEventListener('click', () => {
-      taskSortByStatus = !taskSortByStatus;
-      document.getElementById('task-sort-btn').style.color = taskSortByStatus ? 'var(--accent)' : '';
-      renderTaskList();
-    });
+    function renderTasksPane(pane, projectFilter) {
+      currentProjectFilter = projectFilter;
+      pane.classList.add('editor-pane-tasks');
+      pane.innerHTML = `
+        <div class="proj-tasks-header">
+          <span>Tasks</span>
+          <button class="icon-btn" id="proj-task-new-btn" title="New task">+</button>
+        </div>
+        <div class="proj-tasks-board"></div>
+      `;
+      tasksBoardEl = pane.querySelector('.proj-tasks-board');
+      pane.querySelector('#proj-task-new-btn').addEventListener('click', () => openTaskModal());
+      fetchTasks();
+    }
 
-    // Edit button on task items
-    document.getElementById('tasks-body').addEventListener('click', e => {
-      const btn = e.target.closest('.proj-task-edit-btn');
-      if (btn) openTaskModal(btn.dataset.id);
-    });
+    function fetchTasks() {
+      const url = currentProjectFilter
+        ? `/api/tasks?project=${encodeURIComponent(currentProjectFilter)}`
+        : '/api/tasks';
+      return fetch(url)
+        .then(r => r.json())
+        .then(data => {
+          if (!data.connected || !tasksBoardEl) return;
+          tasksData = data;
+          const allTasks = [...(data.today ?? []), ...(data.backlog ?? [])];
+          taskById = Object.fromEntries(allTasks.map(t => [t.id, t]));
+          renderKanbanBoard({
+            containerEl: tasksBoardEl,
+            tasks: allTasks,
+            projectNameFor: () => '',
+            onDrop: changeTaskStatus,
+            onEdit: openTaskModal,
+          });
+        });
+    }
+
+    function changeTaskStatus(taskId, status) {
+      fetch(`/api/tasks/${encodeURIComponent(taskId)}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status }),
+      }).then(() => fetchTasks());
+    }
 
     // ── Task modal ──────────────────────────────────────────────────────────────
     let editingTaskId = null;
@@ -1342,15 +1025,23 @@
       ).join('');
     }
 
+    function populateTaskModalProjects(selected) {
+      const sel = document.getElementById('task-modal-project');
+      fetch('/api/projects').then(r => r.json()).then(projects => {
+        const folder = p => p.path.replace(/\/[^/]+\.md$/, '');
+        sel.innerHTML = '<option value="">&mdash; none &mdash;</option>' +
+          projects.map(p => `<option value="${esc(folder(p))}">${esc(p.name)}</option>`).join('');
+        sel.value = selected ?? '';
+      });
+    }
+
     function openTaskModal(taskId = null) {
       editingTaskId = taskId;
       const t = taskId ? taskById[taskId] : null;
       document.getElementById('task-modal-title').textContent = t ? 'Edit Task' : 'New Task';
       document.getElementById('task-modal-name').value    = t ? t.title   : '';
       document.getElementById('task-modal-status').value  = t ? (t.status ?? 'Backlog') : 'Backlog';
-      document.getElementById('task-modal-project').value = t ? (t.project ?? currentNotionProject ?? '') : (currentNotionProject ?? '');
-      document.getElementById('task-modal-jobtype').value = t ? (t.jobType ?? '') : '';
-      document.getElementById('task-modal-folder').value  = t ? (t.folder ?? '') : '';
+      populateTaskModalProjects(t ? (t.project ?? currentProjectFilter) : currentProjectFilter);
       buildActivityPills(t ? (t.activity ?? []) : []);
       document.getElementById('task-modal-overlay').classList.add('open');
       document.getElementById('task-modal-name').focus();
@@ -1361,7 +1052,6 @@
       editingTaskId = null;
     }
 
-    document.getElementById('task-new-btn').addEventListener('click', () => openTaskModal());
     document.getElementById('task-modal-cancel').addEventListener('click', closeTaskModal);
     document.getElementById('task-modal-overlay').addEventListener('click', e => {
       if (e.target === document.getElementById('task-modal-overlay')) closeTaskModal();
@@ -1371,9 +1061,7 @@
       const name    = document.getElementById('task-modal-name').value.trim();
       if (!name) { document.getElementById('task-modal-name').focus(); return; }
       const status  = document.getElementById('task-modal-status').value;
-      const project = document.getElementById('task-modal-project').value.trim() || null;
-      const jobType = document.getElementById('task-modal-jobtype').value || null;
-      const folder  = document.getElementById('task-modal-folder').value.trim() || null;
+      const project = document.getElementById('task-modal-project').value || null;
       const activity = [...document.querySelectorAll('#task-modal-activity input:checked')].map(el => el.value);
 
       const btn = document.getElementById('task-modal-submit');
@@ -1385,17 +1073,17 @@
           await fetch(`/api/tasks/${encodeURIComponent(editingTaskId)}`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ title: name, status, project, jobType, activity, folder }),
+            body: JSON.stringify({ title: name, status, project, activity }),
           });
         } else {
           await fetch('/api/tasks', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ title: name, status, project, jobType, activity, folder }),
+            body: JSON.stringify({ title: name, status, project, activity }),
           });
         }
         closeTaskModal();
-        loadProjectTasks(currentNotionProject);
+        await fetchTasks();
       } finally {
         btn.disabled = false;
         btn.textContent = 'Save';

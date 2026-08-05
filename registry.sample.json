@@ -4,7 +4,6 @@
       "id": "work",
       "name": "Work",
       "path": "/path/to/your-workspace",
-      "notionDatabaseId": "",
       "features": ["projects", "meetings", "notebook"],
       "activityTypes": ["Organization", "Learning", "Meeting"],
       "customRoots": {
@@ -15,7 +14,6 @@
       "id": "home",
       "name": "Home",
       "path": "/path/to/your-home-workspace",
-      "notionDatabaseId": "",
       "features": ["projects", "notebook"],
       "activityTypes": ["Organization", "Reading", "Learning"]
     }

@@ -920,28 +920,6 @@ tr:hover .item-delete-btn { display: inline-block; }
 }
 
 /* ── Tasks ───────────────────────────────────────────────────────────────────── */
-.task-item {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 6px 8px;
-  border-radius: 6px;
-  border-left: 2px solid transparent;
-  transition: background 0.1s;
-  margin-bottom: 1px;
-}
-
-.task-item:hover {
-  background: var(--surface2);
-}
-
-.task-status-today        { border-left-color: var(--status-active); }
-.task-status-in-progress  { border-left-color: var(--accent); }
-.task-status-not-started  { border-left-color: var(--muted); }
-.task-status-this-week    { border-left-color: var(--status-backlog); }
-.task-status-backlog      { border-left-color: var(--border); }
-
 .task-filters {
   display: flex;
   align-items: center;
@@ -969,12 +947,6 @@ tr:hover .item-delete-btn { display: inline-block; }
   border-color: var(--accent);
 }
 
-.task-filter-select--small {
-  font-size: 10px;
-  padding: 2px 4px;
-}
-
-
 .task-edit-btn {
   appearance: none;
   background: none;
@@ -988,29 +960,7 @@ tr:hover .item-delete-btn { display: inline-block; }
   transition: opacity 0.1s, color 0.1s;
   line-height: 1;
 }
-.task-item:hover .task-edit-btn { opacity: 1; }
 .task-edit-btn:hover { color: var(--text); }
-
-.task-section + .task-section {
-  margin-top: 12px;
-}
-
-.task-section-heading {
-  font-size: 10px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--muted);
-  padding: 2px 8px 4px;
-}
-
-.task-title {
-  font-size: 13px;
-  color: var(--text);
-  line-height: 1.4;
-  flex: 1;
-  min-width: 0;
-}
 
 .task-badges {
   display: flex;
@@ -1027,12 +977,98 @@ tr:hover .item-delete-btn { display: inline-block; }
   border-radius: 4px;
   padding: 1px 5px;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
 }
 
-.task-badge-job {
-  color: #a78bfa;
-  border-color: #3d2f6b;
-  background: #1e1535;
+.task-badge-activity {
+  color: var(--accent);
+}
+
+/* ── Kanban board ────────────────────────────────────────────────────────────── */
+.kanban-board {
+  display: flex;
+  gap: 10px;
+  overflow-x: auto;
+  height: 100%;
+  padding-bottom: 4px;
+}
+
+.kanban-column {
+  display: flex;
+  flex-direction: column;
+  flex: 0 0 180px;
+  min-width: 180px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  max-height: 100%;
+}
+
+.kanban-column.drag-over {
+  border-color: var(--accent);
+}
+
+.kanban-column-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.kanban-column-count {
+  color: var(--muted2);
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: normal;
+}
+
+.kanban-column-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 6px;
+  overflow-y: auto;
+  min-height: 40px;
+}
+
+.kanban-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 8px;
+  cursor: grab;
+}
+
+.kanban-card.dragging {
+  opacity: 0.4;
+}
+
+.kanban-card:hover .task-edit-btn {
+  opacity: 1;
+}
+
+.kanban-card-title {
+  font-size: 12px;
+  color: var(--text);
+  line-height: 1.4;
+}
+
+.kanban-card .task-badges {
+  flex-wrap: wrap;
 }
 
 /* ── Icon button ("+") ───────────────────────────────────────────────────────── */
@@ -1900,6 +1936,34 @@ tr:hover .item-delete-btn { display: inline-block; }
   flex-direction: column;
 }
 
+/* Tasks pane (Kanban board tab) */
+.editor-pane-tasks {
+  padding: 0;
+  overflow: hidden;
+}
+
+.editor-pane-tasks.active {
+  display: flex;
+  flex-direction: column;
+}
+
+.proj-tasks-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+  color: var(--muted);
+  flex-shrink: 0;
+}
+
+.proj-tasks-board {
+  flex: 1;
+  min-height: 0;
+  padding: 12px 16px;
+}
+
 .editor-save-bar {
   display: flex;
   align-items: center;
@@ -2283,119 +2347,6 @@ tr:hover .item-delete-btn { display: inline-block; }
   padding: 4px 4px;
 }
 
-.proj-task-item {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: 6px 8px;
-  border-radius: 5px;
-  transition: background 0.1s;
-}
-.proj-task-item:hover { background: var(--surface2); }
-
-.proj-task-title {
-  font-size: 12px;
-  color: var(--text);
-  line-height: 1.4;
-  text-decoration: none;
-}
-.proj-task-title:hover { text-decoration: underline; }
-
-.proj-task-row {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.proj-task-status {
-  font-size: 10px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: var(--muted);
-  flex: 1;
-}
-.proj-task-status--today        { color: var(--status-active); }
-.proj-task-status--in-progress  { color: var(--status-on-hold); }
-.proj-task-status--this-week    { color: var(--status-backlog); }
-
-.proj-task-status-wrap { position: relative; }
-
-.proj-task-status-trigger {
-  appearance: none;
-  background: none;
-  border: none;
-  padding: 0 2px;
-  font-size: 13px;
-  color: var(--muted);
-  cursor: pointer;
-  opacity: 0;
-  transition: opacity 0.1s;
-  line-height: 1;
-}
-.proj-task-item:hover .proj-task-status-trigger { opacity: 1; }
-.proj-task-status-trigger:hover { color: var(--text); }
-
-.proj-task-status-menu {
-  display: none;
-  position: absolute;
-  top: 100%;
-  right: 0;
-  z-index: 100;
-  background: var(--surface2);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 4px;
-  flex-direction: column;
-  gap: 1px;
-  min-width: 110px;
-}
-.proj-task-status-menu.open { display: flex; }
-
-.proj-task-status-option {
-  appearance: none;
-  background: none;
-  border: none;
-  padding: 4px 8px;
-  border-radius: 4px;
-  text-align: left;
-  font-size: 11px;
-  color: var(--text);
-  cursor: pointer;
-}
-.proj-task-status-option:hover { background: var(--surface2); }
-.proj-task-status-option.active { color: var(--accent); }
-
-.proj-task-badges {
-  display: flex;
-  gap: 3px;
-  flex-wrap: wrap;
-}
-
-.task-badge-activity {
-  font-size: 10px;
-  background: var(--surface2);
-  color: var(--muted2);
-  border-radius: 3px;
-  padding: 1px 5px;
-}
-
-.proj-task-edit-btn {
-  appearance: none;
-  background: none;
-  border: none;
-  color: var(--muted);
-  cursor: pointer;
-  font-size: 13px;
-  padding: 2px 4px;
-  border-radius: 3px;
-  line-height: 1;
-  opacity: 0;
-  transition: opacity 0.1s, color 0.1s;
-}
-.proj-task-item:hover .proj-task-edit-btn { opacity: 1; }
-.proj-task-edit-btn:hover { color: var(--text); }
-
 /* Activity pills in modals */
 .modal-pills {
   display: flex;
@@ -2420,35 +2371,6 @@ tr:hover .item-delete-btn { display: inline-block; }
   color: #fff;
   border-color: var(--accent);
 }
-
-.proj-task-create {
-  display: flex;
-  gap: 4px;
-  padding: 6px 8px;
-  border-top: 1px solid var(--border);
-}
-.proj-task-create-input {
-  flex: 1;
-  background: var(--surface2);
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  padding: 4px 7px;
-  font-size: 12px;
-  color: var(--text);
-  outline: none;
-}
-.proj-task-create-input:focus { border-color: var(--accent); }
-.proj-task-create-btn {
-  appearance: none;
-  background: var(--surface2);
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  padding: 4px 8px;
-  font-size: 14px;
-  color: var(--muted);
-  cursor: pointer;
-}
-.proj-task-create-btn:hover { color: var(--text); background: var(--surface2); }
 
 /* File rows with delete button */
 .file-row {
@@ -2898,29 +2820,6 @@ tr:hover .item-delete-btn { display: inline-block; }
   font-family: inherit;
   padding: 5px 8px;
   outline: none;
-}
-
-.readme-todo-body {
-  padding: 6px 0 8px;
-}
-
-.readme-todo-body .meeting-section-heading {
-  padding: 8px 14px 4px;
-}
-
-.readme-todo-body .meeting-task {
-  padding-left: 10px;
-  padding-right: 10px;
-}
-
-.readme-todo-body .add-item-row {
-  padding: 4px 8px 2px;
-}
-
-.readme-todo-body .add-subsection-row {
-  padding: 6px 10px 4px;
-  border-top: 1px solid var(--border);
-  margin-top: 4px;
 }
 
 .readme-link-group + .readme-link-group {

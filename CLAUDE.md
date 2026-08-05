@@ -16,8 +16,9 @@ server.js  ──reads/writes──▶  REPO_ROOT/  (workspace directory on disk
                                   meetings/<type>/<name>.md
                                   links.json
                                   workspace.json
+                                  tasks.json           ← local Kanban task store
 registry.json  (app directory, gitignored)
-    └─ maps workspace IDs → local paths + Notion DB IDs
+    └─ maps workspace IDs → local paths
 ```
 
 ### Configuration chain
@@ -27,7 +28,6 @@ At startup, `server.js` reads two config files:
 1. **`registry.json`** (in the app directory, gitignored) — picks the active workspace by `WORKSPACE` env var (defaults to `'work'`). Provides:
    - `ws.path` → `REPO_ROOT` (absolute path to the workspace directory)
    - `ws.features` → `ALLOWED_ROOTS` (Set of enabled root names; doubles as the feature flag list)
-   - `ws.notionDatabaseId` → Notion data source
    - `ws.worktreeDirs` → directories to scan for git worktrees (F1 feature)
    - `ws.customRoots` → optional overrides for section root paths (see Path model below)
 
@@ -103,6 +103,19 @@ Meetings have two layers:
 
 **Mutation pattern**: all mutations (`toggle`, `add-item`, `delete-line`, `update-line`, `replace-section`, `add-decision`) go through `mutateMeeting(relPath, mutatorFn)`. The mutator receives the file as an array of raw lines and returns the modified array. **Lines are matched by their exact raw string including leading whitespace** — never by index. This is intentional so that a stale client can't corrupt an unrelated line.
 
+### Task system
+
+Tasks live in `REPO_ROOT/tasks.json` — a flat array read/written wholesale (same pattern as `links.json`), via `lib/task-store.js` (`readTasks`, `writeTasks`, `splitTasks`). Each task is `{ id, title, status, project, activity[], createdAt, updatedAt }`.
+
+**`project` is a project-folder key, not a display name** — the same value as `project.path` (from `/api/projects`) with the trailing `/README.md` stripped, and the same value `project.html`'s own `?path=` query param carries. This is what lets a project page's Tasks tab filter tasks for that project with an exact match (`GET /api/tasks?project=<path>`), and it's why the task-modal's Project field is a `<select>` populated from `/api/projects` rather than free text.
+
+Routes (`server.js`, mirroring the `links.json` GET/PUT pattern plus per-id mutation):
+- `GET /api/tasks` (optional `?project=`) → `{ connected, today, backlog }`, split via `TODAY_STATUSES`/`IGNORED_STATUSES` in `lib/task-store.js`
+- `POST /api/tasks` → append a new task (`crypto.randomUUID()` id)
+- `PUT /api/tasks/:id` → patch fields on an existing task
+
+**UI**: both `index.html` (global board, left column) and `project.html` (a "Tasks" tab alongside "README", added via `editorApi.openCustomPane`) render a Kanban board through the shared `public/kanban.js` module (`renderKanbanBoard`) — one column per status, drag-and-drop between columns changes status via `PUT /api/tasks/:id`. Don't duplicate board-rendering logic in either page; extend `kanban.js` instead.
+
 ### F1 / worktree feature
 
 The `f1` root uses a separate path model. It has its own `customRoot` entry in `registry.json` pointing to a different directory. Projects within it are discovered by scanning `Active/` and `Backlog/` subdirectories rather than a README index. The worktree routes (`/api/worktree-dirs`, `/api/worktree-files`, `/api/worktree-md`) allow browsing and editing markdown files in git worktrees registered under `ws.worktreeDirs`. These routes validate that the `worktree` path is within a configured worktree directory before allowing access.
@@ -156,6 +169,6 @@ The markdown editor in `project.html` uses Toast UI v3 loaded from CDN. Dark-the
 
 ## Workspace configuration
 
-- `registry.json` (gitignored) maps workspace IDs to local paths and Notion DB IDs.
+- `registry.json` (gitignored) maps workspace IDs to local paths.
 - `workspace.json` in each workspace root defines `projectGroups` for that workspace.
 - `/api/workspace` exposes `{ id, name, features, projectGroups }` — use this on the frontend to drive nav visibility and the new-project group dropdown.

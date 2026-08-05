@@ -7,7 +7,6 @@ A local browser-based workspace dashboard. Works against any registered workspac
 ```bash
 npm install
 cp registry.sample.json registry.json   # then fill in your paths
-cp .env.sample .env                      # then add NOTION_API_KEY if needed
 npm start
 ```
 
@@ -36,7 +35,7 @@ $env:WORKSPACE="home"; $env:PORT="3002"; npm start
 
 ## registry.json
 
-Gitignored. Maps workspace IDs to local paths and Notion config. See `registry.sample.json` for the full format.
+Gitignored. Maps workspace IDs to local paths. See `registry.sample.json` for the full format.
 
 ```json
 {
@@ -48,8 +47,7 @@ Gitignored. Maps workspace IDs to local paths and Notion config. See `registry.s
       "features": ["projects", "meetings", "notebook", "f1"],
       "customRoots": {
         "f1": "/path/to/external/projects/F1"
-      },
-      "notionDatabaseId": "..."
+      }
     }
   ]
 }
@@ -60,13 +58,13 @@ Gitignored. Maps workspace IDs to local paths and Notion config. See `registry.s
 Each workspace directory must contain:
 - `workspace.json` — defines `projectGroups` (array of folder name prefixes shown in the project list)
 - `links.json` — quick links shown on the Links page
+- `tasks.json` — created automatically on first task save; the local Kanban task list
 
 ## .env variables
 
 | Variable | Required | Description |
 |----------|----------|-------------|
 | `WORKSPACE` | No | Which workspace to load (default: `work`) |
-| `NOTION_API_KEY` | No | Notion integration token — enables the task widget |
 | `PORT` | No | Override the default port 3001 |
 
 ## Project Structure
@@ -78,12 +76,13 @@ mkd-dashboard/
 ├── registry.json        # gitignored — your local workspace paths
 ├── registry.sample.json
 └── public/
-    ├── index.html       # Home — Tasks, Projects, Meetings tabs
-    ├── project.html     # Project view — file tree + markdown editor
+    ├── index.html       # Home — Tasks (Kanban), Projects, Meetings tabs
+    ├── project.html     # Project view — file tree + markdown editor + Tasks tab
     ├── editor.html      # Generic markdown editor (Notebook, Ideas, …)
     ├── meeting.html     # Meeting view — editable sections and tasks
     ├── links.html       # Quick links manager
     ├── editor-core.js   # Shared file tree, tab manager, TipTap editor
+    ├── kanban.js         # Shared Kanban board renderer (used by index.html and project.html)
     ├── style.css        # Global dark-theme styles (CSS variable tokens)
     ├── resize.js        # Shared sidebar resize logic
     └── quotes.js        # Random quote helper
@@ -124,8 +123,8 @@ mkd-dashboard/
 | PUT | `/api/project-status` | Update a project's status |
 | GET | `/api/links` | Read `links.json` from workspace root |
 | PUT | `/api/links` | Persist updated `links.json` |
-| GET | `/api/tasks` | Fetch today/backlog tasks from Notion |
-| POST | `/api/tasks` | Create a new Notion task |
-| PUT | `/api/tasks/:id` | Update a task's status |
+| GET | `/api/tasks` | Read `tasks.json`, split into today/backlog (optional `?project=`) |
+| POST | `/api/tasks` | Create a new task in `tasks.json` |
+| PUT | `/api/tasks/:id` | Update a task (status, project, etc.) |
 | GET | `/files/:root/*` | Serve workspace files (images, attachments) |
 | GET | `/api/f1/projects` | List F1 design projects from `customRoots.f1` |

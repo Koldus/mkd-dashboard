@@ -23,7 +23,6 @@ beforeAll(() => {
       name: 'Test Workspace',
       path: tempDir,
       features: ['projects', 'meetings'],
-      notionDatabaseId: null,
     }],
   }));
 
