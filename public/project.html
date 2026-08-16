@@ -60,6 +60,7 @@
         </div>
       </div>
       <div class="modal-actions">
+        <button class="modal-btn modal-btn-danger" id="task-modal-delete" hidden>Delete</button>
         <button class="modal-btn" id="task-modal-cancel">Cancel</button>
         <button class="modal-btn modal-btn-primary" id="task-modal-submit">Save</button>
       </div>
@@ -729,6 +730,21 @@
         renderConversationsWidget(convWidget, projectPath);
       }
 
+      // Left: Tasks widget
+      if (root === 'projects') {
+        const tasksWidget = document.createElement('div');
+        tasksWidget.className = 'readme-widget';
+        tasksWidget.innerHTML =
+          `<div class="readme-widget-header"><span>Tasks</span>` +
+          `<button class="icon-btn" id="proj-task-new-btn" title="New task">+</button></div>` +
+          `<div class="readme-widget-body tasks-widget-body"></div>`;
+        tasksWidget.querySelector('#proj-task-new-btn').addEventListener('click', () => openTaskModal());
+        leftCol.appendChild(tasksWidget);
+        currentProjectFilter = projectPath;
+        tasksBoardEl = tasksWidget.querySelector('.tasks-widget-body');
+        fetchTasks();
+      }
+
       // Right: Status widget
       const currentStatus = getReadmeStatus();
       const statusWidget  = document.createElement('div');
@@ -940,7 +956,9 @@
           readmeDoc      = parseReadme(data.markdown);
           sectionHtmlMap = extractSectionHtml(data.html);
           renderReadme(pane);
-          editorApi.openCustomPane('__tasks__', 'Tasks', tasksPane => renderTasksPane(tasksPane, projectPath), { permanent: true });
+          if (root !== 'projects') {
+            editorApi.openCustomPane('__tasks__', 'Tasks', tasksPane => renderTasksPane(tasksPane, projectPath), { permanent: true });
+          }
         } else {
           setupTuiPane(pane, tab, {
             markdown: data.markdown,
@@ -1043,6 +1061,7 @@
       document.getElementById('task-modal-status').value  = t ? (t.status ?? 'Backlog') : 'Backlog';
       populateTaskModalProjects(t ? (t.project ?? currentProjectFilter) : currentProjectFilter);
       buildActivityPills(t ? (t.activity ?? []) : []);
+      document.getElementById('task-modal-delete').hidden = !taskId;
       document.getElementById('task-modal-overlay').classList.add('open');
       document.getElementById('task-modal-name').focus();
     }
@@ -1055,6 +1074,20 @@
     document.getElementById('task-modal-cancel').addEventListener('click', closeTaskModal);
     document.getElementById('task-modal-overlay').addEventListener('click', e => {
       if (e.target === document.getElementById('task-modal-overlay')) closeTaskModal();
+    });
+
+    document.getElementById('task-modal-delete').addEventListener('click', async () => {
+      if (!editingTaskId) return;
+      if (!confirm('Delete this task?')) return;
+      const btn = document.getElementById('task-modal-delete');
+      btn.disabled = true;
+      try {
+        await fetch(`/api/tasks/${encodeURIComponent(editingTaskId)}`, { method: 'DELETE' });
+        closeTaskModal();
+        await fetchTasks();
+      } finally {
+        btn.disabled = false;
+      }
     });
 
     document.getElementById('task-modal-submit').addEventListener('click', async () => {

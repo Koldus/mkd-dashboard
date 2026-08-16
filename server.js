@@ -814,6 +814,20 @@ app.put('/api/tasks/:id', (req, res) => {
   }
 });
 
+// DELETE /api/tasks/:id — remove a task
+app.delete('/api/tasks/:id', (req, res) => {
+  try {
+    const tasks = readTasks(REPO_ROOT);
+    const next = tasks.filter(t => t.id !== req.params.id);
+    if (next.length === tasks.length) return res.status(404).json({ error: 'Task not found' });
+    writeTasks(REPO_ROOT, next);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[tasks] delete error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // GET /files/:root/* — serve workspace attachments (images, PDFs, etc.)
 // Markdown files are excluded; all paths are validated against the section root.
 app.get('/files/:root/*', (req, res) => {

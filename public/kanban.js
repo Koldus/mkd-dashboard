@@ -1,7 +1,7 @@
 // Shared Kanban board renderer, used by both index.html (global board) and
 // project.html (per-project board, filtered task list passed in by the caller).
 
-export const KANBAN_STATUSES = ['Today', 'In progress', 'This Week', 'Plan soon', 'Backlog', 'On Hold', 'Done'];
+export const KANBAN_STATUSES = ['Today', 'In progress', 'This Week', 'Plan soon', 'Backlog', 'On Hold'];
 
 function esc(str) {
   const d = document.createElement('div');

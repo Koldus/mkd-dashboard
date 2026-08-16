@@ -10,6 +10,7 @@
   --muted:     #52525b;
   --muted2:    #71717a;
   --accent:    #4f83f7;
+  --danger:    #ef4444;
   --radius:    10px;
   --gap:       14px;
 
@@ -1201,6 +1202,17 @@ tr:hover .item-delete-btn { display: inline-block; }
 .modal-btn:disabled {
   opacity: 0.5;
   cursor: default;
+}
+
+.modal-btn-danger {
+  margin-right: auto;
+  color: var(--danger);
+}
+
+.modal-btn-danger:hover {
+  color: #fff;
+  background: var(--danger);
+  border-color: var(--danger);
 }
 
 /* ── Quick Links page ────────────────────────────────────────────────────────── */
@@ -2664,6 +2676,11 @@ tr:hover .item-delete-btn { display: inline-block; }
 .readme-widget-body.prose h3 { font-size: 12px; margin-top: 12px; }
 .readme-widget-body.prose p:last-child,
 .readme-widget-body.prose ul:last-child { margin-bottom: 0; }
+
+.tasks-widget-body {
+  padding: 10px;
+  height: 420px;
+}
 
 .readme-status-body {
   padding: 10px 12px;
