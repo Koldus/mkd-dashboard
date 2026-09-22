@@ -43,6 +43,7 @@ function addToProjectsOverview(relPath, status, name) {
   if (updated) fs.writeFileSync(overviewPath, updated.join('\n'), 'utf8');
 }
 
+// The `## Project Checklist` heading must match CHECKLIST_SECTION in public/project.html.
 const README_TEMPLATE_WORK = (title, status) =>
 `# ${title}
 
@@ -51,6 +52,8 @@ const README_TEMPLATE_WORK = (title, status) =>
 ## Goal
 
 ## Context
+
+## Project Checklist
 
 ## Documentation
 
@@ -73,6 +76,8 @@ const README_TEMPLATE_HOME = (title, status) =>
 **Status:** ${status}
 
 ## Goal
+
+## Project Checklist
 
 ## Shopping List
 

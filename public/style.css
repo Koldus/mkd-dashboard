@@ -2682,6 +2682,29 @@ tr:hover .item-delete-btn { display: inline-block; }
   height: 420px;
 }
 
+/* Project Checklist widget — reuses .meeting-task / .add-item-row from the meeting view */
+.checklist-widget-body {
+  padding: 6px 8px 8px;
+}
+
+/* meeting.html sets this inline as part of its indent calculation; the flat variant has none. */
+.checklist-widget-body .meeting-task {
+  padding-left: 8px;
+}
+
+.checklist-note {
+  font-size: 12px;
+  color: var(--muted2);
+  padding: 4px 8px;
+  white-space: pre-wrap;
+}
+
+.checklist-progress {
+  color: var(--muted2);
+  font-weight: 400;
+  letter-spacing: 0;
+}
+
 .readme-status-body {
   padding: 10px 12px;
 }

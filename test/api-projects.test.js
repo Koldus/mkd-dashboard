@@ -107,6 +107,7 @@ describe('POST /api/project-file', () => {
     const content = fs.readFileSync(filePath, 'utf8');
     expect(content).toContain('**Status:** backlog');
     expect(content).toContain('## Goal');
+    expect(content).toContain('## Project Checklist');
 
     const overview = fs.readFileSync(path.join(tempDir, 'projects', 'README.md'), 'utf8');
     expect(overview).toContain('| [Brand New](other-projects/brand-new/README.md) | backlog |');

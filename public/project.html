@@ -241,6 +241,8 @@
 
     const LINK_SECTIONS    = new Set(['Documentation', 'Links & Resources', 'Shopping List']);
     const STATUS_VALUES    = ['active', 'on hold', 'paused', 'backlog', 'done'];
+    // Must match the section heading in README_TEMPLATE_WORK / _HOME (server.js).
+    const CHECKLIST_SECTION = 'Project Checklist';
 
     function getReadmeStatus() {
       for (const line of readmeDoc.headerLines) {
@@ -577,6 +579,35 @@
       return groups;
     }
 
+    // Flat checkbox list. Non-checkbox lines are preserved in place — `preamble` holds
+    // those before the first item, `item.after` those following a given item — so hand-written
+    // prose inside the section survives a toggle. `indent` is captured verbatim (the widget is
+    // flat, but a pre-existing nested list must not be silently flattened).
+    function parseChecklistSection(lines) {
+      const items = [];
+      const preamble = [];
+      for (const raw of lines) {
+        // `(.*)` not `(.+)`: a bare `- [ ]` must parse as an empty item, not fall through to prose.
+        const m = raw.match(/^(\s*)- \[([ xX])\]\s?(.*)$/);
+        if (m) {
+          items.push({ indent: m[1], checked: m[2].toLowerCase() === 'x', text: m[3].trim(), after: [] });
+        } else if (raw.trim()) {
+          (items.length ? items[items.length - 1].after : preamble).push(raw);
+        }
+      }
+      return { type: 'checklist', name: CHECKLIST_SECTION, preamble, items };
+    }
+
+    // Existing project READMEs predate this section. Splice in a virtual one so the widget is
+    // always available; `ephemeral` keeps serializeReadme from writing it until it's actually used.
+    function ensureChecklistSection(doc) {
+      if (doc.sections.some(s => s.name === CHECKLIST_SECTION)) return;
+      const i = doc.sections.findIndex(s => s.type === 'links');
+      doc.sections.splice(i === -1 ? doc.sections.length : i, 0, {
+        type: 'checklist', name: CHECKLIST_SECTION, preamble: [], items: [], ephemeral: true,
+      });
+    }
+
     function parseReadme(markdown) {
       const allLines = markdown.split('\n');
       const headerLines = [];
@@ -603,6 +634,7 @@
       return {
         headerLines,
         sections: sections.map(s => {
+          if (s.name === CHECKLIST_SECTION) return parseChecklistSection(s.lines);
           if (LINK_SECTIONS.has(s.name)) return { type: 'links', name: s.name, groups: parseLinkSection(s.lines) };
           return { type: 'prose', name: s.name, lines: s.lines };
         }),
@@ -629,6 +661,16 @@
         parts.push(`\n## ${s.name}\n`);
         if (s.type === 'prose') {
           parts.push(s.lines.join('\n'));
+        } else if (s.type === 'checklist') {
+          // Never materialise an unused virtual section — drop the heading we just pushed.
+          if (s.ephemeral && !s.items.length && !s.preamble.length) { parts.pop(); continue; }
+          const out = [...s.preamble];
+          if (s.preamble.length) out.push('');
+          for (const it of s.items) {
+            out.push(`${it.indent}- [${it.checked ? 'x' : ' '}] ${it.text}`.trimEnd());
+            out.push(...it.after);
+          }
+          parts.push(out.join('\n'));
         } else {
           for (const g of s.groups) {
             if (g.heading !== null) parts.push(`\n### ${g.heading}\n`);
@@ -663,6 +705,127 @@
         `</div></li>`;
     }
 
+    // ── Project Checklist widget ────────────────────────────────────────────────
+    // Flat variant of the meeting checklist (see meeting.html buildListHTML/wireListHandlers):
+    // no ### groups, no indent controls, no drag-reorder.
+
+    function buildChecklistWidget(sec) {
+      const widget = document.createElement('div');
+      widget.className = 'readme-widget';
+      widget.innerHTML =
+        `<div class="readme-widget-header">` +
+        `<span>${esc(sec.name)} <span class="checklist-progress"></span></span></div>`;
+      const body = document.createElement('div');
+      body.className = 'readme-widget-body checklist-widget-body';
+      widget.appendChild(body);
+      renderChecklistBody(body, sec);
+      return widget;
+    }
+
+    function renderChecklistBody(bodyEl, sec) {
+      const note = line => `<div class="checklist-note">${esc(line)}</div>`;
+      let html = sec.preamble.map(note).join('');
+
+      if (!sec.items.length && !sec.preamble.length) {
+        html += `<p class="proj-empty">—</p>`;
+      }
+      sec.items.forEach((it, i) => {
+        html += `<div class="meeting-task" data-idx="${i}">
+          <input type="checkbox" ${it.checked ? 'checked' : ''}>
+          <span class="task-text">${esc(it.text)}</span>
+          <div class="task-controls"><button class="item-delete-btn" title="Delete">×</button></div>
+        </div>`;
+        html += it.after.map(note).join('');
+      });
+
+      html += `<div class="add-item-row">
+        <button class="add-item-btn">+ Add item</button>
+        <input type="text" class="add-item-input" placeholder="New deliverable…">
+      </div>`;
+
+      bodyEl.innerHTML = html;
+
+      const progress = bodyEl.closest('.readme-widget').querySelector('.checklist-progress');
+      progress.textContent = sec.items.length
+        ? `${sec.items.filter(it => it.checked).length}/${sec.items.length}`
+        : '';
+
+      wireChecklistHandlers(bodyEl, sec);
+    }
+
+    async function saveChecklist(sec, bodyEl) {
+      sec.ephemeral = false;
+      await saveReadme();
+      renderChecklistBody(bodyEl, sec);
+    }
+
+    function wireChecklistHandlers(bodyEl, sec) {
+      bodyEl.querySelectorAll('.meeting-task input[type="checkbox"]').forEach(cb => {
+        cb.addEventListener('change', () => {
+          sec.items[parseInt(cb.closest('.meeting-task').dataset.idx)].checked = cb.checked;
+          saveChecklist(sec, bodyEl);
+        });
+      });
+
+      bodyEl.querySelectorAll('.meeting-task .item-delete-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const idx = parseInt(btn.closest('.meeting-task').dataset.idx);
+          // Re-home the deleted item's trailing prose so it isn't silently eaten.
+          const orphaned = sec.items[idx].after;
+          (idx > 0 ? sec.items[idx - 1].after : sec.preamble).push(...orphaned);
+          sec.items.splice(idx, 1);
+          saveChecklist(sec, bodyEl);
+        });
+      });
+
+      bodyEl.querySelectorAll('.task-text').forEach(span => {
+        span.addEventListener('dblclick', () => startChecklistEdit(span, sec, bodyEl));
+      });
+
+      const row   = bodyEl.querySelector('.add-item-row');
+      const btn   = row.querySelector('.add-item-btn');
+      const input = row.querySelector('.add-item-input');
+      btn.addEventListener('click', () => {
+        btn.style.display = 'none'; input.style.display = 'block'; input.focus();
+      });
+      const dismiss = () => { input.value = ''; input.style.display = 'none'; btn.style.display = ''; };
+      input.addEventListener('keydown', async e => {
+        if (e.key === 'Enter') {
+          const text = input.value.trim();
+          if (!text) { dismiss(); return; }
+          sec.items.push({ indent: '', checked: false, text, after: [] });
+          dismiss();
+          await saveChecklist(sec, bodyEl);
+        }
+        if (e.key === 'Escape') dismiss();
+      });
+      input.addEventListener('blur', dismiss);
+    }
+
+    function startChecklistEdit(span, sec, bodyEl) {
+      const idx = parseInt(span.closest('.meeting-task').dataset.idx);
+      const current = span.textContent;
+      const input = document.createElement('input');
+      input.type = 'text'; input.value = current; input.className = 'inline-edit-input';
+      span.replaceWith(input); input.focus(); input.select();
+      let saved = false;
+      const save = async () => {
+        if (saved) return; saved = true;
+        const newText = input.value.trim();
+        if (newText && newText !== current) {
+          sec.items[idx].text = newText;
+          await saveChecklist(sec, bodyEl);
+        } else {
+          renderChecklistBody(bodyEl, sec);
+        }
+      };
+      input.addEventListener('keydown', e => {
+        if (e.key === 'Enter') save();
+        if (e.key === 'Escape') { saved = true; renderChecklistBody(bodyEl, sec); }
+      });
+      input.addEventListener('blur', save);
+    }
+
     function renderReadme(pane) {
       pane.innerHTML = '';
 
@@ -676,6 +839,7 @@
       // Left: all non-link sections in document order
       for (const sec of readmeDoc.sections) {
         if (sec.type === 'links') continue;
+        if (sec.type === 'checklist') { leftCol.appendChild(buildChecklistWidget(sec)); continue; }
         const widget = document.createElement('div');
         widget.className = 'readme-widget';
         widget.innerHTML =
@@ -955,6 +1119,7 @@
           pane.classList.add('readme-view');
           readmeDoc      = parseReadme(data.markdown);
           sectionHtmlMap = extractSectionHtml(data.html);
+          if (root === 'projects') ensureChecklistSection(readmeDoc);
           renderReadme(pane);
           if (root !== 'projects') {
             editorApi.openCustomPane('__tasks__', 'Tasks', tasksPane => renderTasksPane(tasksPane, projectPath), { permanent: true });
