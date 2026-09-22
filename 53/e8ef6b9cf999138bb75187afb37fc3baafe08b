@@ -1,0 +1,19 @@
+public/editor-core.js
+  s_ce903b5c3ca050::t_b35348795a9fda 212,214-220,245-248,251-278,280-283,301-303,356-357,538
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "53e8ef6b9cf999138bb75187afb37fc3baafe08b",
+  "prompts": {},
+  "sessions": {
+    "s_ce903b5c3ca050": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e878031a-713a-4b8d-846a-b9ab1007cb18",
+        "model": "unknown"
+      },
+      "human_author": "Koldus <Miroslav.Koldus@gmail.com>"
+    }
+  }
+}
