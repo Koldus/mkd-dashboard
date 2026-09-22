@@ -209,14 +209,15 @@ export function setupTuiPane(pane, tab, { markdown, root, savePath, saveFn, imag
   const statusEl = saveBar.querySelector('.editor-save-status');
   const saveBtn  = saveBar.querySelector('.editor-save-btn');
   let dirty = false;
+  let inSourceMode = false;
 
-  function markDirty() {
-    if (dirty) return;
-    dirty = true;
-    statusEl.textContent = 'Unsaved changes';
-    statusEl.classList.add('dirty');
-    saveBtn.disabled = false;
-    tab.classList.add('tab-dirty');
+  function setDirty(next) {
+    if (dirty === next) return;
+    dirty = next;
+    statusEl.textContent = next ? 'Unsaved changes' : 'All changes saved';
+    statusEl.classList.toggle('dirty', next);
+    saveBtn.disabled = !next;
+    tab.classList.toggle('tab-dirty', next);
   }
 
   // tiptap-markdown serializes images as ![alt](src), losing width/height.
@@ -241,16 +242,45 @@ export function setupTuiPane(pane, tab, { markdown, root, savePath, saveFn, imag
     return md;
   }
 
-  function save() {
-    const md = inSourceMode
+  // The exact string a save would write — also the basis for the dirty comparison, so that
+  // "unchanged" means "would write the same bytes" rather than "hasn't been touched".
+  function currentMarkdown() {
+    return inSourceMode
       ? unresolveImages(sourceEl.value, baseUrl)
       : frontmatter + unresolveImages(getMarkdown(), baseUrl);
+  }
+
+  // Compared against serializer output rather than the raw file: TipTap normalises list
+  // markers, escaping and image syntax on load, so the file on disk is frequently not
+  // byte-identical to what a save would produce even before any edit.
+  // null means the initial doc couldn't be serialized; refreshDirty then falls back to the
+  // old latch behaviour rather than risk clearing a genuine unsaved state.
+  let baselineMd = null;
+  try { baselineMd = currentMarkdown(); } catch { /* leave null */ }
+
+  // Recomputing means running the markdown serializer, which is too much work per keystroke.
+  // An edit flips the dot on immediately (cheap, and almost always right); the debounced
+  // comparison is what can flip it back off after an undo.
+  let dirtyCheckTimer = null;
+  function refreshDirty() {
+    clearTimeout(dirtyCheckTimer);
+    dirtyCheckTimer = null;
+    if (baselineMd === null) return;
+    try { setDirty(currentMarkdown() !== baselineMd); } catch { /* leave the flag as-is */ }
+  }
+  function scheduleDirtyCheck() {
+    setDirty(true);
+    clearTimeout(dirtyCheckTimer);
+    dirtyCheckTimer = setTimeout(refreshDirty, 250);
+  }
+
+  function save() {
+    const md = currentMarkdown();
     const finish = () => {
-      dirty = false;
-      statusEl.textContent = 'All changes saved';
-      statusEl.classList.remove('dirty');
-      saveBtn.disabled = true;
-      tab.classList.remove('tab-dirty');
+      baselineMd = md;
+      clearTimeout(dirtyCheckTimer);
+      dirtyCheckTimer = null;
+      setDirty(false);
     };
     if (saveFn) {
       saveFn(md).then(finish).catch(err => alert(err.message));
@@ -268,7 +298,9 @@ export function setupTuiPane(pane, tab, { markdown, root, savePath, saveFn, imag
 
   saveBtn.addEventListener('click', save);
   pane.addEventListener('keydown', e => {
-    if ((e.ctrlKey || e.metaKey) && e.key === 's') { e.preventDefault(); if (dirty) save(); }
+    // Flush any pending debounce first, so Ctrl+S right after an undo doesn't rewrite
+    // identical content — and, right after a keystroke, doesn't skip a real save.
+    if ((e.ctrlKey || e.metaKey) && e.key === 's') { e.preventDefault(); refreshDirty(); if (dirty) save(); }
   });
 
   // ── Toolbar ───────────────────────────────────────────────────────────────
@@ -321,8 +353,8 @@ export function setupTuiPane(pane, tab, { markdown, root, savePath, saveFn, imag
   });
 
   editor.on('selectionUpdate', () => { updateToolbar(); updateLinkTooltip(); });
-  editor.on('update', () => { markDirty(); updateToc(); updateToolbar(); updateLinkTooltip(); });
-  sourceEl.addEventListener('input', markDirty);
+  editor.on('update', () => { scheduleDirtyCheck(); updateToc(); updateToolbar(); updateLinkTooltip(); });
+  sourceEl.addEventListener('input', scheduleDirtyCheck);
 
   // ── Image insert ──────────────────────────────────────────────────────────
   function toggleImgForm() {
@@ -503,7 +535,7 @@ export function setupTuiPane(pane, tab, { markdown, root, savePath, saveFn, imag
   function handleLink() { openLinkForm(); }
 
   // ── Source mode ───────────────────────────────────────────────────────────
-  let inSourceMode = false;
+  // inSourceMode is declared up in the save/dirty block — currentMarkdown() needs it.
   const sourceBtn = toolbar.querySelector('[data-cmd="source"]');
 
   function toggleSource() {
