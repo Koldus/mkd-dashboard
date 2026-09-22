@@ -1,0 +1,25 @@
+public/project.html
+  s_ce903b5c3ca050::t_34512878c2c6cb 244-245,582-610,637,664-673,708-828,842,1122
+public/style.css
+  s_ce903b5c3ca050::t_19c2906b213d27 2685-2707
+server.js
+  s_ce903b5c3ca050::t_d1e2d1a4442c1c 46,56-57,80-81
+test/api-projects.test.js
+  s_ce903b5c3ca050::t_91c30ceb55c8f0 110
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "75e7ea918dfd3d2c25923ad4f256055a6a103be5",
+  "prompts": {},
+  "sessions": {
+    "s_ce903b5c3ca050": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e878031a-713a-4b8d-846a-b9ab1007cb18",
+        "model": "unknown"
+      },
+      "human_author": "Koldus <Miroslav.Koldus@gmail.com>"
+    }
+  }
+}
