@@ -2464,6 +2464,32 @@ tr:hover .item-delete-btn { display: inline-block; }
 .file-row:hover .file-row-delete { opacity: 1; }
 .file-row-delete:hover { color: #ef4444; background: rgba(239,68,68,0.1); }
 
+/* ── Worktree git state dots ─────────────────────────────────────────────────── */
+/* Deliberately not .status-dot: that encodes project status, and reusing it would tie
+   git colors to any future retune of the project palette. */
+.git-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  margin-right: 4px;
+  background: var(--git-dot-color);
+}
+
+.git-dot--modified   { --git-dot-color: var(--status-backlog); }
+.git-dot--untracked  { --git-dot-color: var(--status-active); }
+.git-dot--staged     { --git-dot-color: var(--accent); }
+.git-dot--conflicted { --git-dot-color: var(--danger); }
+
+/* Folder rollups read as hollow rings: "contains changes" vs "is changed". Folders render
+   expanded by default, so both are usually on screen at once. */
+.folder-header .git-dot {
+  background: transparent;
+  border: 1.5px solid var(--git-dot-color);
+  width: 7px;
+  height: 7px;
+}
+
 /* ── File tree icons ─────────────────────────────────────────────────────────── */
 .nav-tree-icon {
   flex-shrink: 0;

@@ -6,6 +6,7 @@ const crypto = require('crypto');
 const { marked } = require('marked');
 const { detectProjectReadme, insertProjectOverviewRow, parseProjectGroupsFromOverview } = require('./lib/project-helpers');
 const { readTasks, writeTasks, splitTasks } = require('./lib/task-store');
+const { getGitStatus } = require('./lib/git-status');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -19,10 +20,24 @@ const REPO_ROOT = path.resolve(path.dirname(REGISTRY_PATH), ws.path);
 const workspaceConfig = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, 'workspace.json'), 'utf8'));
 const ALLOWED_ROOTS = new Set(ws.features);
 const PROJECT_GROUP_PREFIXES = workspaceConfig.projectGroups;
-const WORKTREE_DIRS = ws.worktreeDirs || [];
+const WORKTREE_DIRS = (ws.worktreeDirs || []).map(d => path.resolve(d));
 
+// Both sides are resolved so that `..` segments in the query param can't walk out of a
+// configured worktree dir. Deliberately no fs.realpathSync: on macOS os.tmpdir() is a
+// symlink (/var → /private/var), so resolving links on one side only would break the tests
+// and any symlinked worktree dir.
 function validateWorktreePath(p) {
-  return WORKTREE_DIRS.some(d => p === d || p.startsWith(d + path.sep));
+  const abs = path.resolve(p);
+  return WORKTREE_DIRS.some(d => abs === d || abs.startsWith(d + path.sep));
+}
+
+// Resolve <worktree>/projects/F1/<f1path>, asserting it stays inside the worktree.
+// Returns null if either check fails; callers 403 on null.
+function resolveF1Dir(worktree, f1path) {
+  if (!validateWorktreePath(worktree)) return null;
+  const root = path.resolve(worktree);
+  const dir  = path.resolve(root, 'projects', 'F1', f1path);
+  return dir.startsWith(root + path.sep) ? dir : null;
 }
 
 function getSectionRoot(rootName) {
@@ -189,12 +204,12 @@ app.get('/api/worktree-dirs', (req, res) => {
 app.get('/api/worktree-files', (req, res) => {
   const { worktree, f1path } = req.query;
   console.log('[worktree-files] worktree=%s f1path=%s', worktree, f1path);
-  if (!worktree || !validateWorktreePath(worktree)) {
+  if (!f1path) return res.status(400).json({ error: 'f1path required' });
+  const targetDir = worktree && resolveF1Dir(worktree, f1path);
+  if (!targetDir) {
     console.log('[worktree-files] FORBIDDEN — not in WORKTREE_DIRS:', WORKTREE_DIRS);
     return res.status(403).json({ error: 'Forbidden' });
   }
-  if (!f1path) return res.status(400).json({ error: 'f1path required' });
-  const targetDir = path.join(worktree, 'projects', 'F1', f1path);
   console.log('[worktree-files] targetDir=%s exists=%s', targetDir, fs.existsSync(targetDir));
   if (!fs.existsSync(targetDir)) return res.json([]);
   try {
@@ -210,9 +225,9 @@ app.get('/api/worktree-files', (req, res) => {
 // PUT /api/worktree-md — save a file back to the worktree
 app.put('/api/worktree-md', (req, res) => {
   const { worktree, f1path, file, content } = req.body;
-  if (!worktree || !validateWorktreePath(worktree)) return res.status(403).json({ error: 'Forbidden' });
   if (!f1path || !file) return res.status(400).json({ error: 'f1path and file required' });
-  const baseDir = path.join(worktree, 'projects', 'F1', f1path);
+  const baseDir = worktree && resolveF1Dir(worktree, f1path);
+  if (!baseDir) return res.status(403).json({ error: 'Forbidden' });
   const absPath = path.resolve(baseDir, file);
   if (!absPath.startsWith(baseDir + path.sep)) return res.status(403).json({ error: 'Forbidden' });
   if (!fs.existsSync(absPath)) return res.status(404).json({ error: 'Not found' });
@@ -227,14 +242,29 @@ app.put('/api/worktree-md', (req, res) => {
 // GET /api/worktree-md?worktree=/abs&f1path=Active/Name&file=rel.md — read a file from worktree
 app.get('/api/worktree-md', (req, res) => {
   const { worktree, f1path, file } = req.query;
-  if (!worktree || !validateWorktreePath(worktree)) return res.status(403).json({ error: 'Forbidden' });
   if (!f1path || !file) return res.status(400).json({ error: 'f1path and file required' });
-  const baseDir = path.join(worktree, 'projects', 'F1', f1path);
+  const baseDir = worktree && resolveF1Dir(worktree, f1path);
+  if (!baseDir) return res.status(403).json({ error: 'Forbidden' });
   const absPath = path.resolve(baseDir, file);
   if (!absPath.startsWith(baseDir + path.sep)) return res.status(403).json({ error: 'Forbidden' });
   if (!fs.existsSync(absPath)) return res.status(404).json({ error: 'Not found' });
   const markdown = fs.readFileSync(absPath, 'utf8');
   res.json({ markdown, html: marked(markdown) });
+});
+
+// GET /api/worktree-status?worktree=/abs&f1path=Active/Name — uncommitted git state for the
+// .md files under that subpath, keyed by the same relative paths /api/worktree-files returns.
+// Git failures come back as 200 { ok: false } rather than 5xx: a worktree dir that isn't a
+// git repo is a normal configuration, and the tree must still render undecorated.
+app.get('/api/worktree-status', async (req, res) => {
+  const { worktree, f1path } = req.query;
+  if (!f1path) return res.status(400).json({ error: 'f1path required' });
+  const targetDir = worktree && resolveF1Dir(worktree, f1path);
+  if (!targetDir) return res.status(403).json({ error: 'Forbidden' });
+  if (!fs.existsSync(targetDir)) return res.json({ ok: true, statuses: {} });
+  const result = await getGitStatus(targetDir);
+  if (!result.ok) console.log('[worktree-status] %s — %s', result.reason, targetDir);
+  res.json(result);
 });
 
 // Recursively collect all .md files under a directory, skipping _template dirs and _ files

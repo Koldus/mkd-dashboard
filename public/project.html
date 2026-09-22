@@ -479,9 +479,72 @@
         if (!files.length) { wtNav.innerHTML = '<p class="proj-empty">No files found</p>'; return; }
         wtNav.innerHTML = '';
         renderWorktreeTree(files, wtNav);
+        // Not awaited — the tree shouldn't wait on a git subprocess to appear.
+        decorateWorktreeGit(wtPath, wtF1Path, wtNav, ++worktreeNavToken);
       } catch {
         wtNav.innerHTML = '<p class="proj-empty">Error loading files</p>';
       }
+    }
+
+    // ── Worktree git state ──────────────────────────────────────────────────────
+
+    let worktreeNavToken = 0;
+
+    const GIT_STATE_LABELS = {
+      modified: 'Modified', untracked: 'Untracked', staged: 'Staged', conflicted: 'Conflicted',
+    };
+    // A folder shows its most urgent child.
+    const GIT_STATE_RANK = { conflicted: 3, modified: 2, untracked: 1, staged: 0 };
+
+    async function decorateWorktreeGit(wtPath, wtF1Path, container, token) {
+      let statuses;
+      try {
+        const data = await fetch(
+          `/api/worktree-status?worktree=${encodeURIComponent(wtPath)}&f1path=${encodeURIComponent(wtF1Path)}`
+        ).then(r => r.json());
+        if (!data.ok) return;          // not a git repo, git missing, timeout — leave undecorated
+        statuses = data.statuses;
+      } catch {
+        return;
+      }
+      // loadWorktreeNav runs on every tab activation, so a slow response can arrive after
+      // the tree it was requested for has been replaced.
+      if (token !== worktreeNavToken) return;
+
+      const folders = {};
+      for (const [p, state] of Object.entries(statuses)) {
+        const parts = p.split('/');
+        for (let i = 0; i < parts.length - 1; i++) {
+          const key = parts.slice(0, i + 1).join('/');
+          if (!(key in folders) || GIT_STATE_RANK[state] > GIT_STATE_RANK[folders[key]]) {
+            folders[key] = state;
+          }
+        }
+      }
+
+      for (const el of container.querySelectorAll('[data-git-path]')) {
+        const dot = el.querySelector(':scope > .git-dot');
+        if (!dot) continue;
+        dot.className = 'git-dot';     // reset, so re-decoration after a save clears stale dots
+        dot.hidden = true;
+        dot.removeAttribute('title');
+        const isFolder = el.classList.contains('folder-header');
+        const state = (isFolder ? folders : statuses)[el.dataset.gitPath];
+        if (!state) continue;
+        dot.className = `git-dot git-dot--${state}`;
+        dot.title = GIT_STATE_LABELS[state];
+        dot.hidden = false;
+      }
+    }
+
+    // Re-run only the decoration pass — a save can't change the file list.
+    function refreshWorktreeGitDots() {
+      const wtNav = document.getElementById('worktree-nav');
+      if (!wtNav || wtNav.hidden) return;
+      const wtPath = getWorktreePath();
+      const wtF1Path = getWorktreeF1Path();
+      if (!wtPath || !wtF1Path) return;
+      decorateWorktreeGit(wtPath, wtF1Path, wtNav, worktreeNavToken);
     }
 
     function renderWorktreeTree(files, container) {
@@ -491,7 +554,9 @@
         const parts = f.split('/');
         let node = tree;
         for (let i = 0; i < parts.length - 1; i++) {
-          if (!node.dirs[parts[i]]) node.dirs[parts[i]] = { dirs: {}, files: [] };
+          if (!node.dirs[parts[i]]) {
+            node.dirs[parts[i]] = { dirs: {}, files: [], path: parts.slice(0, i + 1).join('/') };
+          }
           node = node.dirs[parts[i]];
         }
         node.files.push({ name: parts[parts.length - 1], path: f });
@@ -507,7 +572,9 @@
         header.className = 'folder-header';
         header.innerHTML =
           `<span class="folder-chevron"></span>` +
-          `<span class="folder-name">${esc(dir)}</span>`;
+          `<span class="folder-name">${esc(dir)}</span>` +
+          `<span class="git-dot" hidden></span>`;
+        header.dataset.gitPath = node.dirs[dir].path;
         const children = document.createElement('div');
         children.className = 'folder-children';
         header.addEventListener('click', () => {
@@ -534,6 +601,13 @@
           `<span class="file-label">${esc(f.name.replace(/\.md$/, ''))}</span>`;
         btn.addEventListener('click', () => openWorktreeFile(f.path));
         row.appendChild(btn);
+        // Sibling of the button, not inside it: keeps the dot out of the click target and
+        // puts it in the same trailing slot .file-row-delete uses on the project tree.
+        const dot = document.createElement('span');
+        dot.className = 'git-dot';
+        dot.hidden = true;
+        row.appendChild(dot);
+        row.dataset.gitPath = f.path;
         container.appendChild(row);
       }
     }
@@ -555,6 +629,7 @@
           });
           const d = await r.json();
           if (d.error) throw new Error(d.error);
+          refreshWorktreeGitDots();
         });
       } catch (err) {
         alert(`Error opening file: ${err.message}`);
