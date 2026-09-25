@@ -273,8 +273,9 @@
     }
 
     // ── Conversations tab ─────────────────────────────────────────────────────
-    const CONV_TYPE_LABELS   = { question: 'Question', reference: 'Reference', 'customer-request': 'Customer Request' };
-    const CONV_STATUS_LABELS = { unanswered: 'Unanswered', answered: 'Answered', saved: 'Saved', dismissed: 'Dismissed' };
+    // Keep in sync with the same maps in project.html.
+    const CONV_TYPE_LABELS   = { question: 'Question', reference: 'Reference', 'customer-request': 'Customer Request', idea: 'Idea' };
+    const CONV_STATUS_LABELS = { unanswered: 'Unanswered', answered: 'Answered', saved: 'Saved', dismissed: 'Dismissed', open: 'Open' };
     let allConversations  = [];
     let convTypeFilter    = '';
     let convStatusFilter  = '';
@@ -288,7 +289,9 @@
             ${entry.projectName ? `<span class="conv-meta">${esc(entry.projectName)}</span>` : ''}
           </div>
           <a class="conv-excerpt" href="${esc(entry.permalink || '#')}" target="_blank" rel="noopener noreferrer">${esc(entry.excerpt || '(no excerpt)')}</a>
-          <div class="conv-meta">${esc(entry.channel || '')}${entry.author ? ' · ' + esc(entry.author) : ''}</div>
+          <div class="conv-meta">${esc(entry.channel || '')}${entry.author ? ' · ' + esc(entry.author) : ''}${entry.source === 'inbox' ? ' · filed' : ''}</div>
+          ${entry.captureNote ? `<div class="conv-note"><div class="conv-note-label">Filed with</div><div class="conv-note-text">${esc(entry.captureNote)}</div></div>` : ''}
+          ${entry.notes ? `<div class="conv-note"><div class="conv-note-label">Notes</div><div class="conv-note-text">${esc(entry.notes)}</div></div>` : ''}
         </div>
       </li>`;
     }
@@ -309,11 +312,13 @@
           <select id="conv-type-filter" class="task-filter-select">
             <option value="">all types</option>
             <option value="question">Questions</option>
+            <option value="idea">Ideas</option>
             <option value="reference">Reference</option>
             <option value="customer-request">Customer Requests</option>
           </select>
           <select id="conv-status-filter" class="task-filter-select">
             <option value="">all statuses</option>
+            <option value="open">Open</option>
             <option value="unanswered">Unanswered</option>
             <option value="answered">Answered</option>
             <option value="saved">Saved</option>

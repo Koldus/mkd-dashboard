@@ -19,6 +19,10 @@
   --status-on-hold:  #6b7280;
   --status-paused:   #a855f7;
   --status-done:     #10b981;
+
+  /* Conversation vocabulary that has no project-status equivalent */
+  --conv-idea:       #38bdf8;
+  --conv-open:       #3b82f6;
 }
 
 html, body {
@@ -2802,11 +2806,13 @@ tr:hover .item-delete-btn { display: inline-block; }
 .conv-type-question          { background: var(--status-backlog); }
 .conv-type-reference         { background: var(--status-on-hold); }
 .conv-type-customer-request  { background: var(--status-paused); }
+.conv-type-idea              { background: var(--conv-idea); }
 
 .conv-status-unanswered { background: var(--status-backlog); }
 .conv-status-answered   { background: var(--status-active); }
 .conv-status-saved      { background: var(--status-done); }
 .conv-status-dismissed  { background: var(--status-on-hold); }
+.conv-status-open       { background: var(--conv-open); }
 
 .conv-excerpt {
   color: var(--text);
@@ -2843,6 +2849,62 @@ tr:hover .item-delete-btn { display: inline-block; }
   color: var(--text);
   white-space: pre-wrap;
   margin-bottom: 6px;
+}
+
+/* Notes kept beside a conversation, and the read-only instruction it was filed with.
+   Same geometry as .conv-draft. */
+.conv-note {
+  margin-top: 6px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+}
+
+.conv-note-label {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: 4px;
+}
+
+.conv-note-text {
+  font-size: 13px;
+  color: var(--text);
+  white-space: pre-wrap;
+}
+
+.conv-notes-edit {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.conv-notes-edit[hidden] { display: none; }
+
+.conv-notes-textarea {
+  width: 100%;
+  min-height: 70px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1.6;
+  padding: 8px 10px;
+  outline: none;
+  resize: vertical;
+}
+
+.conv-notes-textarea:focus { border-color: var(--accent); }
+
+.conv-notes-actions {
+  display: flex;
+  gap: 6px;
 }
 
 .conv-row-actions {

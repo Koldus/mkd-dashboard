@@ -297,8 +297,9 @@
     }
 
     // ── Conversations widget (Slack tracker) ────────────────────────────────
-    const CONV_TYPE_LABELS   = { question: 'Question', reference: 'Reference', 'customer-request': 'Customer Request' };
-    const CONV_STATUS_LABELS = { unanswered: 'Unanswered', answered: 'Answered', saved: 'Saved', dismissed: 'Dismissed' };
+    // Keep in sync with the same maps in index.html.
+    const CONV_TYPE_LABELS   = { question: 'Question', reference: 'Reference', 'customer-request': 'Customer Request', idea: 'Idea' };
+    const CONV_STATUS_LABELS = { unanswered: 'Unanswered', answered: 'Answered', saved: 'Saved', dismissed: 'Dismissed', open: 'Open' };
 
     async function loadConversations() {
       const r = await fetch('/api/conversations');
@@ -306,24 +307,22 @@
       return r.json();
     }
 
-    async function saveConversations(all) {
-      await fetch('/api/conversations', {
+    // Patches one entry server-side rather than rewriting the whole array from a page that
+    // may have loaded minutes ago — /slack-inbox writes the same file.
+    async function patchConversation(id, patch) {
+      await fetch(`/api/conversations/${encodeURIComponent(id)}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(all),
+        body: JSON.stringify(patch),
       });
     }
 
-    async function setConversationStatus(id, newStatus) {
-      const all = await loadConversations();
-      const entry = all.find(c => c.id === id);
-      if (!entry) return;
-      entry.status = newStatus;
-      entry.lastUpdated = new Date().toISOString();
-      await saveConversations(all);
-    }
-
     function conversationActions(entry) {
+      if (entry.type === 'idea') {
+        if (entry.status === 'dismissed') return [{ label: 'Restore', next: 'open' }];
+        if (entry.status === 'saved')     return [{ label: 'Reopen', next: 'open' }, { label: 'Dismiss', next: 'dismissed' }];
+        return [{ label: 'Done', next: 'saved' }, { label: 'Dismiss', next: 'dismissed' }];
+      }
       if (entry.type === 'reference') {
         return entry.status === 'dismissed'
           ? [{ label: 'Restore', next: 'saved' }]
@@ -342,14 +341,30 @@
         `<span class="conv-badge conv-status-${esc(entry.status)}">${esc(CONV_STATUS_LABELS[entry.status] || entry.status)}</span>` +
         `</div>` +
         `<a class="conv-excerpt" href="${esc(entry.permalink || '#')}" target="_blank" rel="noopener noreferrer">${esc(entry.excerpt || '(no excerpt)')}</a>` +
-        `<div class="conv-meta">${esc(entry.channel || '')}${entry.author ? ' · ' + esc(entry.author) : ''}</div>` +
+        `<div class="conv-meta">${esc(entry.channel || '')}${entry.author ? ' · ' + esc(entry.author) : ''}` +
+        `${entry.source === 'inbox' ? ' · filed' : ''}</div>` +
         (entry.draftResponse
           ? `<div class="conv-draft"><div class="conv-draft-label">Drafted response</div>` +
             `<div class="conv-draft-text">${esc(entry.draftResponse)}</div>` +
             `<button class="conv-copy-btn" data-copy="${esc(entry.draftResponse)}">Copy</button></div>`
           : '') +
+        // Read-only: captureNote belongs to /slack-inbox, which rewrites it on every re-file.
+        (entry.captureNote
+          ? `<div class="conv-note"><div class="conv-note-label">Filed with</div>` +
+            `<div class="conv-note-text">${esc(entry.captureNote)}</div></div>`
+          : '') +
+        (entry.notes
+          ? `<div class="conv-note"><div class="conv-note-label">Notes</div>` +
+            `<div class="conv-note-text">${esc(entry.notes)}</div></div>`
+          : '') +
+        `<div class="conv-notes-edit" hidden>` +
+        `<textarea class="conv-notes-textarea">${esc(entry.notes || '')}</textarea>` +
+        `<div class="conv-notes-actions">` +
+        `<button class="link-save-btn">Save</button><button class="link-cancel-btn">Cancel</button>` +
+        `</div></div>` +
         `</div>` +
         `<div class="conv-row-actions">` +
+        `<button class="links-action-btn conv-notes-btn">${entry.notes ? 'Edit notes' : 'Notes'}</button>` +
         conversationActions(entry).map(a => `<button class="links-action-btn" data-id="${esc(entry.id)}" data-next="${esc(a.next)}">${esc(a.label)}</button>`).join('') +
         `</div></li>`;
     }
@@ -368,13 +383,28 @@
 
       body.querySelectorAll('.conv-row-actions [data-next]').forEach(btn => {
         btn.addEventListener('click', async () => {
-          await setConversationStatus(btn.dataset.id, btn.dataset.next);
+          await patchConversation(btn.dataset.id, { status: btn.dataset.next });
           renderConversationsWidget(widget, projPath);
         });
       });
 
       body.querySelectorAll('.conv-copy-btn').forEach(btn => {
         btn.addEventListener('click', () => navigator.clipboard.writeText(btn.dataset.copy));
+      });
+
+      body.querySelectorAll('.conv-row').forEach(row => {
+        const editor = row.querySelector('.conv-notes-edit');
+        row.querySelector('.conv-notes-btn').addEventListener('click', () => {
+          editor.hidden = !editor.hidden;
+          if (!editor.hidden) editor.querySelector('textarea').focus();
+        });
+        editor.querySelector('.link-save-btn').addEventListener('click', async () => {
+          await patchConversation(row.dataset.id, { notes: editor.querySelector('textarea').value.trim() });
+          renderConversationsWidget(widget, projPath);
+        });
+        editor.querySelector('.link-cancel-btn').addEventListener('click', () => {
+          editor.hidden = true;
+        });
       });
     }
 

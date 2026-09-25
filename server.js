@@ -7,6 +7,7 @@ const { marked } = require('marked');
 const { detectProjectReadme, insertProjectOverviewRow, parseProjectGroupsFromOverview } = require('./lib/project-helpers');
 const { readTasks, writeTasks, splitTasks } = require('./lib/task-store');
 const { getGitStatus } = require('./lib/git-status');
+const { readConversations, writeConversations } = require('./lib/conversation-store');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -748,8 +749,7 @@ app.put('/api/links', (req, res) => {
 app.get('/api/conversations', (req, res) => {
   if (!ALLOWED_ROOTS.has('conversations')) return res.status(403).json({ error: 'Forbidden' });
   try {
-    const data = fs.readFileSync(path.join(REPO_ROOT, 'conversations.json'), 'utf8');
-    res.json(JSON.parse(data));
+    res.json(readConversations(REPO_ROOT));
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -761,8 +761,34 @@ app.put('/api/conversations', (req, res) => {
   try {
     const data = req.body;
     if (!Array.isArray(data)) return res.status(400).json({ error: 'Expected an array' });
-    fs.writeFileSync(path.join(REPO_ROOT, 'conversations.json'), JSON.stringify(data, null, 2), 'utf8');
+    writeConversations(REPO_ROOT, data);
     res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// PUT /api/conversations/:id — patch the fields the dashboard owns.
+// Deliberately a whitelist rather than a merge: a conversation is a faithful record of
+// something in Slack, so the UI may only move its status and edit the notes kept beside it.
+// Everything else — excerpt, type, captureNote, draftResponse — belongs to the skills.
+app.put('/api/conversations/:id', (req, res) => {
+  if (!ALLOWED_ROOTS.has('conversations')) return res.status(403).json({ error: 'Forbidden' });
+  try {
+    const all = readConversations(REPO_ROOT);
+    const entry = all.find(c => c.id === req.params.id);
+    if (!entry) return res.status(404).json({ error: 'Conversation not found' });
+
+    const { notes, status } = req.body;
+    if (notes !== undefined) {
+      entry.notes = notes === null || notes === '' ? null : String(notes);
+      entry.notesUpdatedAt = entry.notes === null ? null : new Date().toISOString();
+    }
+    if (status !== undefined) entry.status = status;
+    entry.lastUpdated = new Date().toISOString();
+
+    writeConversations(REPO_ROOT, all);
+    res.json(entry);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
