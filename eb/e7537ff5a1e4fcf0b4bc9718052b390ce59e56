@@ -1,0 +1,29 @@
+lib/conversation-store.js
+  s_ce903b5c3ca050::t_73e02f7ac7e721 1-31
+public/index.html
+  s_ce903b5c3ca050::t_f67629c256f1c6 276-278,292-294,315,321
+public/project.html
+  s_ce903b5c3ca050::t_9b3f9ac4ed55d9 300-302,310-313,316,321-325,344-345,351-364,367,386,394-408
+public/style.css
+  s_ce903b5c3ca050::t_f9bdebe135e307 22-25,2809,2815,2854-2909
+server.js
+  s_ce903b5c3ca050::t_503da7fccde9dc 10,752,764,771-796
+test/api-conversations.test.js
+  s_ce903b5c3ca050::t_99dc73b1be4680 1-187
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "ebe7537ff5a1e4fcf0b4bc9718052b390ce59e56",
+  "prompts": {},
+  "sessions": {
+    "s_ce903b5c3ca050": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e878031a-713a-4b8d-846a-b9ab1007cb18",
+        "model": "unknown"
+      },
+      "human_author": "Koldus <Miroslav.Koldus@gmail.com>"
+    }
+  }
+}
