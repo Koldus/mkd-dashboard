@@ -1,0 +1,33 @@
+public/index.html
+  s_1f68cad44ef6d4::t_60ccc7a34797b6 23-32,184-198
+public/style.css
+  s_1f68cad44ef6d4::t_1714282aaf652b 398-401,3153-3372
+CLAUDE.md
+  s_1f68cad44ef6d4::t_d096c755cbc76d 119-134
+lib/scan-review-store.js
+  s_1f68cad44ef6d4::t_079eb0163aed13 1-390
+public/scan-review.html
+  s_1f68cad44ef6d4::t_beaff9d2cb010c 1-387
+server.js
+  s_1f68cad44ef6d4::t_60fcae0f26aae9 11,827-879
+test/api-scan-review.test.js
+  s_1f68cad44ef6d4::t_cf3e90fac39c86 1-331
+test/fixtures/slack-scan-review.md
+  s_1f68cad44ef6d4::t_e3978142aed341 1-138
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "0038a2eef476106980e4d30329fbe811d2f8c994",
+  "prompts": {},
+  "sessions": {
+    "s_1f68cad44ef6d4": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9e9d5378-0b9f-41b0-86eb-eacbd4e0e254",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Koldus <Miroslav.Koldus@gmail.com>"
+    }
+  }
+}
