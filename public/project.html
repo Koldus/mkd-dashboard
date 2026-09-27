@@ -451,23 +451,69 @@
         `<option value="Active"${curStatus === 'Active' ? ' selected' : ''}>Active</option>` +
         `<option value="Backlog"${curStatus === 'Backlog' ? ' selected' : ''}>Backlog</option>` +
         `</select>` +
-        `<input id="wt-form-folder" placeholder="Folder name…" value="${esc(curFolder)}" autocomplete="off" />` +
+        `<select id="wt-form-folder"></select>` +
         `<div class="readme-wt-form-actions">` +
         `<button class="link-save-btn" id="wt-form-save">Save</button>` +
         `<button class="link-cancel-btn" id="wt-form-cancel">Cancel</button>` +
         `</div></div>`;
 
+      const wtSel     = widget.querySelector('#wt-form-worktree');
+      const statusSel = widget.querySelector('#wt-form-status');
+      const folderSel = widget.querySelector('#wt-form-folder');
+
+      // Repopulate whenever the worktree or status changes. `keep` is the folder the project
+      // is currently pointed at: it stays selectable even when it isn't in the listing (a
+      // renamed or deleted folder), so opening the form can never silently repoint a project.
+      async function loadFolders(keep) {
+        const wt = wtSel.value;
+        if (!wt) {
+          folderSel.innerHTML = `<option value="">— select a worktree first —</option>`;
+          folderSel.disabled = true;
+          return;
+        }
+        folderSel.disabled = true;
+        folderSel.innerHTML = `<option value="">loading…</option>`;
+        let folders = [];
+        try {
+          folders = await fetch(
+            `/api/worktree-f1-folders?worktree=${encodeURIComponent(wt)}&status=${encodeURIComponent(statusSel.value)}`
+          ).then(r => r.ok ? r.json() : []);
+        } catch { folders = []; }
+
+        // A stored path can differ in case from the folder on disk — macOS resolves it
+        // either way, so the connection works and must not be shown as broken. Match
+        // case-insensitively and select the canonical name, which also normalises the
+        // stored value the next time the form is saved.
+        const canonical = keep && folders.find(f => f.toLowerCase() === keep.toLowerCase());
+        const selected  = canonical || keep;
+        const opts = [...folders];
+        if (selected && !canonical) opts.unshift(selected);   // genuinely absent
+        folderSel.innerHTML =
+          `<option value="">— select folder —</option>` +
+          opts.map(f => {
+            const missing = !folders.includes(f);
+            return `<option value="${esc(f)}"${f === selected ? ' selected' : ''}>` +
+              `${esc(f)}${missing ? ' (not found)' : ''}</option>`;
+          }).join('');
+        folderSel.disabled = false;
+      }
+
+      // Only preserve the current folder while the form still points at its own connection.
+      wtSel.addEventListener('change', () => loadFolders(wtSel.value === wtPath ? curFolder : null));
+      statusSel.addEventListener('change', () => loadFolders(statusSel.value === curStatus ? curFolder : null));
+      loadFolders(curFolder);
+
       widget.querySelector('#wt-form-save').addEventListener('click', async () => {
-        const wt  = widget.querySelector('#wt-form-worktree').value;
-        const st  = widget.querySelector('#wt-form-status').value;
-        const fol = widget.querySelector('#wt-form-folder').value.trim();
+        const wt  = wtSel.value;
+        const st  = statusSel.value;
+        const fol = folderSel.value;
         if (!wt || !fol) return;
         setWorktreeConnection(wt, `${st}/${fol}`);
         await saveReadme();
         renderReadme(pane);
       });
       widget.querySelector('#wt-form-cancel').addEventListener('click', () => renderWorktreeWidget(widget, pane));
-      widget.querySelector('#wt-form-worktree').focus();
+      wtSel.focus();
     }
 
     // ── File sidebar tabs ────────────────────────────────────────────────────

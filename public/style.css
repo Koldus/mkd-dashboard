@@ -3069,6 +3069,8 @@ tr:hover .item-delete-btn { display: inline-block; }
 .readme-wt-form select:focus,
 .readme-wt-form input:focus { border-color: var(--accent); }
 
+.readme-wt-form select:disabled { color: var(--muted); cursor: default; }
+
 .readme-wt-form-actions {
   display: flex;
   gap: 6px;

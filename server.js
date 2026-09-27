@@ -253,6 +253,28 @@ app.get('/api/worktree-md', (req, res) => {
   res.json({ markdown, html: marked(markdown) });
 });
 
+// GET /api/worktree-f1-folders?worktree=/abs&status=Active|Backlog — project folders under
+// that status, so the connect form can offer a picker instead of a typed folder name.
+app.get('/api/worktree-f1-folders', (req, res) => {
+  const { worktree, status } = req.query;
+  if (status !== 'Active' && status !== 'Backlog') {
+    return res.status(400).json({ error: 'status must be Active or Backlog' });
+  }
+  const dir = worktree && resolveF1Dir(worktree, status);
+  if (!dir) return res.status(403).json({ error: 'Forbidden' });
+  if (!fs.existsSync(dir)) return res.json([]);
+  try {
+    const folders = fs.readdirSync(dir, { withFileTypes: true })
+      .filter(e => e.isDirectory() && !e.name.startsWith('.') && !e.name.startsWith('_'))
+      .map(e => e.name)
+      .sort((a, b) => a.localeCompare(b));
+    res.json(folders);
+  } catch (err) {
+    console.log('[worktree-f1-folders] ERROR:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // GET /api/worktree-status?worktree=/abs&f1path=Active/Name — uncommitted git state for the
 // .md files under that subpath, keyed by the same relative paths /api/worktree-files returns.
 // Git failures come back as 200 { ok: false } rather than 5xx: a worktree dir that isn't a
