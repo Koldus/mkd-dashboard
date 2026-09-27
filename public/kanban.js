@@ -1,7 +1,12 @@
 // Shared Kanban board renderer, used by both index.html (global board) and
 // project.html (per-project board, filtered task list passed in by the caller).
 
-export const KANBAN_STATUSES = ['Today', 'In progress', 'This Week', 'Plan soon', 'Backlog', 'On Hold'];
+// The canonical order is least to most urgent — Backlog → Plan soon → This Week → Today →
+// In progress → Done — as listed in the task modal and in /tasks. The board reads it from
+// the urgent end so the columns you look at most sit left of the fold and never need
+// scrolling to. 'Done' is a valid status with no column: it is filtered out server-side to
+// keep the board to work that is still live.
+export const KANBAN_STATUSES = ['In progress', 'Today', 'This Week', 'Plan soon', 'Backlog'];
 
 function esc(str) {
   const d = document.createElement('div');
