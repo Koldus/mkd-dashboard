@@ -310,9 +310,13 @@
     }
 
     // ── Conversations widget (Slack tracker) ────────────────────────────────
+    // Per-viewer preference only; it never leaves this browser, so it is fine in
+    // localStorage rather than conversations.json.
+    let convHideAnswered = false;
+    try { convHideAnswered = !!localStorage.getItem('mkd.convHideAnswered'); } catch {}
     // Keep in sync with the same maps in index.html.
     const CONV_TYPE_LABELS   = { question: 'Question', reference: 'Reference', 'customer-request': 'Customer Request', idea: 'Idea' };
-    const CONV_STATUS_LABELS = { unanswered: 'Unanswered', answered: 'Answered', saved: 'Saved', dismissed: 'Dismissed', open: 'Open' };
+    const CONV_STATUS_LABELS = { unanswered: 'Unanswered', answered: 'Answered', saved: 'Saved', open: 'Open' };
 
     async function loadConversations() {
       const r = await fetch('/api/conversations');
@@ -330,20 +334,19 @@
       });
     }
 
+    // No `dismissed` status: answered is enough to take something off the list. A
+    // reference is filed as `saved` on arrival and has nowhere else to go, so it carries
+    // no action at all.
     function conversationActions(entry) {
       if (entry.type === 'idea') {
-        if (entry.status === 'dismissed') return [{ label: 'Restore', next: 'open' }];
-        if (entry.status === 'saved')     return [{ label: 'Reopen', next: 'open' }, { label: 'Dismiss', next: 'dismissed' }];
-        return [{ label: 'Done', next: 'saved' }, { label: 'Dismiss', next: 'dismissed' }];
+        return entry.status === 'saved'
+          ? [{ label: 'Reopen', next: 'open' }]
+          : [{ label: 'Done', next: 'saved' }];
       }
-      if (entry.type === 'reference') {
-        return entry.status === 'dismissed'
-          ? [{ label: 'Restore', next: 'saved' }]
-          : [{ label: 'Dismiss', next: 'dismissed' }];
-      }
-      if (entry.status === 'unanswered') return [{ label: 'Mark answered', next: 'answered' }, { label: 'Dismiss', next: 'dismissed' }];
-      if (entry.status === 'answered')   return [{ label: 'Reopen', next: 'unanswered' }, { label: 'Dismiss', next: 'dismissed' }];
-      return [{ label: 'Restore', next: 'unanswered' }];
+      if (entry.type === 'reference') return [];
+      return entry.status === 'answered'
+        ? [{ label: 'Reopen', next: 'unanswered' }]
+        : [{ label: 'Mark answered', next: 'answered' }];
     }
 
     function conversationRowHTML(entry) {
@@ -383,16 +386,33 @@
     }
 
     async function renderConversationsWidget(widget, projPath) {
-      widget.innerHTML = `<div class="readme-widget-header">Conversations</div><div class="readme-widget-body conv-body">Loading…</div>`;
+      widget.innerHTML =
+        `<div class="readme-widget-header">Conversations` +
+        `<label class="conv-hide-answered"><input type="checkbox" id="conv-hide-answered"` +
+        `${convHideAnswered ? ' checked' : ''}> Hide answered</label></div>` +
+        `<div class="readme-widget-body conv-body">Loading…</div>`;
+
+      widget.querySelector('#conv-hide-answered').addEventListener('change', e => {
+        convHideAnswered = e.target.checked;
+        try { localStorage.setItem('mkd.convHideAnswered', convHideAnswered ? '1' : ''); } catch {}
+        renderConversationsWidget(widget, projPath);
+      });
+
       const all = await loadConversations();
-      const items = all
-        .filter(c => c.projectPath === projPath)
+      const mine = all.filter(c => c.projectPath === projPath);
+      const items = mine
+        .filter(c => !convHideAnswered || c.status !== 'answered')
         .sort((a, b) => (b.lastUpdated || '').localeCompare(a.lastUpdated || ''));
+
+      const hiddenCount = mine.length - items.length;
 
       const body = widget.querySelector('.conv-body');
       body.innerHTML = items.length
-        ? `<ul class="conv-list">${items.map(conversationRowHTML).join('')}</ul>`
-        : `<p class="proj-empty">No tracked conversations yet.</p>`;
+        ? `<ul class="conv-list">${items.map(conversationRowHTML).join('')}</ul>` +
+          (hiddenCount ? `<p class="conv-hidden-note">${hiddenCount} answered hidden</p>` : '')
+        : (hiddenCount
+            ? `<p class="proj-empty">Nothing open. ${hiddenCount} answered hidden.</p>`
+            : `<p class="proj-empty">No tracked conversations yet.</p>`);
 
       body.querySelectorAll('.conv-row-actions [data-next]').forEach(btn => {
         btn.addEventListener('click', async () => {

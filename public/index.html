@@ -274,10 +274,13 @@
     // ── Conversations tab ─────────────────────────────────────────────────────
     // Keep in sync with the same maps in project.html.
     const CONV_TYPE_LABELS   = { question: 'Question', reference: 'Reference', 'customer-request': 'Customer Request', idea: 'Idea' };
-    const CONV_STATUS_LABELS = { unanswered: 'Unanswered', answered: 'Answered', saved: 'Saved', dismissed: 'Dismissed', open: 'Open' };
+    const CONV_STATUS_LABELS = { unanswered: 'Unanswered', answered: 'Answered', saved: 'Saved', open: 'Open' };
     let allConversations  = [];
     let convTypeFilter    = '';
     let convStatusFilter  = '';
+    // Per-viewer preference; never leaves this browser, so localStorage is the right home.
+    let convHideAnswered  = false;
+    try { convHideAnswered = !!localStorage.getItem('mkd.convHideAnswered'); } catch {}
 
     function convRowHTML(entry) {
       return `<li class="conv-row">
@@ -300,6 +303,7 @@
       let items = allConversations.slice();
       if (convTypeFilter)   items = items.filter(c => c.type === convTypeFilter);
       if (convStatusFilter) items = items.filter(c => c.status === convStatusFilter);
+      if (convHideAnswered) items = items.filter(c => c.status !== 'answered');
       items.sort((a, b) => (b.lastUpdated || '').localeCompare(a.lastUpdated || ''));
 
       const rows = items.length
@@ -321,9 +325,9 @@
             <option value="unanswered">Unanswered</option>
             <option value="answered">Answered</option>
             <option value="saved">Saved</option>
-            <option value="dismissed">Dismissed</option>
           </select>
           <button class="conv-quick-filter" id="conv-quick-unanswered" title="Show unanswered questions">Unanswered questions</button>
+          <label class="conv-hide-answered"><input type="checkbox" id="conv-hide-answered"${convHideAnswered ? ' checked' : ''}> Hide answered</label>
         </div>
         ${rows}
       `;
@@ -336,6 +340,11 @@
       });
       document.getElementById('conv-status-filter').addEventListener('change', e => {
         convStatusFilter = e.target.value;
+        renderConversationsList();
+      });
+      document.getElementById('conv-hide-answered').addEventListener('change', e => {
+        convHideAnswered = e.target.checked;
+        try { localStorage.setItem('mkd.convHideAnswered', convHideAnswered ? '1' : ''); } catch {}
         renderConversationsList();
       });
       document.getElementById('conv-quick-unanswered').addEventListener('click', () => {
