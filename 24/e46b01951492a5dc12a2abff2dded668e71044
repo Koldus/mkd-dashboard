@@ -1,0 +1,31 @@
+public/index.html
+  s_1f68cad44ef6d4::t_6f968778bc8957 277,281-283,306,330,345-349
+public/project.html
+  s_45f31ae206700f::t_a214dfc473024a 313-316,319,337-339,342-344,346-349,389-400,402-404,407-408,411-415
+public/style.css
+  s_1f68cad44ef6d4::t_3252084d928ece 3125-3148
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "24e46b01951492a5dc12a2abff2dded668e71044",
+  "prompts": {},
+  "sessions": {
+    "s_1f68cad44ef6d4": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9e9d5378-0b9f-41b0-86eb-eacbd4e0e254",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Koldus <Miroslav.Koldus@gmail.com>"
+    },
+    "s_45f31ae206700f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6b19dd30-4548-4fc6-ab00-5672d9b8fee1",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Koldus <Miroslav.Koldus@gmail.com>"
+    }
+  }
+}
