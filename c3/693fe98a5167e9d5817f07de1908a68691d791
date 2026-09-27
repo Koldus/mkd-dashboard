@@ -1,0 +1,29 @@
+CLAUDE.md
+  s_45f31ae206700f::t_e05fbb6e59f34f 166,168-185
+public/project.html
+  s_45f31ae206700f::t_1d85d14f42002e 109-122,874,897-898,927-984,986-987,1373-1483
+public/style.css
+  s_45f31ae206700f::t_1816915327501f 2040-2044,3085-3125
+lib/handoff-store.js
+  s_45f31ae206700f::t_a77c017310f1a1 1-175
+server.js
+  s_45f31ae206700f::t_385385da7852d5 11-17,826-888
+test/api-handoffs.test.js
+  s_45f31ae206700f::t_b230b326623c65 1-231
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "c3693fe98a5167e9d5817f07de1908a68691d791",
+  "prompts": {},
+  "sessions": {
+    "s_45f31ae206700f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6b19dd30-4548-4fc6-ab00-5672d9b8fee1",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Koldus <Miroslav.Koldus@gmail.com>"
+    }
+  }
+}
