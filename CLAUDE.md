@@ -116,6 +116,22 @@ Routes (`server.js`, mirroring the `links.json` GET/PUT pattern plus per-id muta
 
 **UI**: both `index.html` (global board, left column) and `project.html` (a "Tasks" tab alongside "README", added via `editorApi.openCustomPane`) render a Kanban board through the shared `public/kanban.js` module (`renderKanbanBoard`) — one column per status, drag-and-drop between columns changes status via `PUT /api/tasks/:id`. Don't duplicate board-rendering logic in either page; extend `kanban.js` instead.
 
+### Slack scan review
+
+`/slack-scan` doesn't write `conversations.json` directly. It writes a temp approval file, `REPO_ROOT/.slack-scan-review.md` (gitignored), and waits. The user edits each card's **Your decision** bullets and **Comment**; those edits *are* the approval. When they tell Claude "done", the skill validates every card, writes `conversations.json`, advances the watermark in `.slack-scan-state.json`, and deletes the review file. A pending review blocks the next scan.
+
+`public/scan-review.html` is a one-card-at-a-time reader for that file, backed by `lib/scan-review-store.js` and two routes (`GET /api/scan-review`, `PUT /api/scan-review/:id`). **It is an editor for the same bytes, not a second copy of them** — there is no separate state, and the skill's contract is untouched.
+
+The store is deliberately **not a markdown parser**. It finds the lines it owns and rewrites only those:
+
+- A card runs from its `### <n> · …` heading to its `<!-- card-end id=… kind=… last=… -->` marker. **The marker, not the array position, identifies a card** — so a file edited by hand in the meantime can't cause a mis-write. Same discipline as `mutateMeeting`.
+- A write touches only the `- Save|Apply|Type|Status|Project:` bullets named in the patch, keeping each bullet's own indentation and spacing, plus the comment body when `comment` is given. Everything else — the quoted message, thread context, overview tables, markers — is written back byte for byte. The tests assert this by diffing the whole file.
+- A missing bullet is an error, not something to append: the shape the skill parses must not change.
+- Sections are read generically from their `**Name**` markers, so the `kind=update` and `kind=close` card shapes (`New replies`, `Proposed update`, `Why close`, and `Apply` instead of `Save`) work without being special-cased.
+- `PUT` validates against the shared vocabulary and refuses anything the skill would reject at "done" — stricter than `PUT /api/conversations/:id`, because a bad value sitting in the file blocks the whole run.
+
+It rides on the `conversations` feature gate (it feeds that tracker and shares its vocabulary); the filename is a fixed constant joined to `REPO_ROOT`, so there is no path to guard. Progress ("seen" cards) is localStorage only, keyed on the review's header line — never written to the file. `index.html` shows a banner while a review is pending; `.split-layout` gets `.has-banner` because its height is a viewport calc.
+
 ### F1 / worktree feature
 
 The `f1` root uses a separate path model. It has its own `customRoot` entry in `registry.json` pointing to a different directory. Projects within it are discovered by scanning `Active/` and `Backlog/` subdirectories rather than a README index. The worktree routes (`/api/worktree-dirs`, `/api/worktree-files`, `/api/worktree-md`) allow browsing and editing markdown files in git worktrees registered under `ws.worktreeDirs`. These routes validate that the `worktree` path is within a configured worktree directory before allowing access.

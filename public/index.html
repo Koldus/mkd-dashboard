@@ -20,7 +20,16 @@
     </div>
   </header>
 
-  <main class="split-layout has-footer">
+  <!-- Shown only while /slack-scan has left a review file waiting to be processed. -->
+  <div class="scan-banner" id="scan-banner" data-feature="conversations" hidden>
+    <span>
+      <span class="scan-banner-text" id="scan-banner-text"></span>
+      <span class="scan-banner-meta" id="scan-banner-meta"></span>
+    </span>
+    <a href="/scan-review.html" class="scan-banner-link">Review →</a>
+  </div>
+
+  <main class="split-layout has-footer" id="main-layout">
 
     <div class="col-left">
       <section class="panel" id="panel-tasks">
@@ -171,6 +180,21 @@
       actSel.innerHTML = '<option value="">all tasks</option>' +
         wsActivityTypes.map(a => `<option value="${a}">${a}</option>`).join('');
     });
+
+    // A pending /slack-scan review blocks the next scan until it's processed, so it nags
+    // from the top of the dashboard rather than waiting to be remembered.
+    fetch('/api/scan-review').then(r => r.ok ? r.json() : { exists: false }).then(review => {
+      if (!review.exists) return;
+      const banner = document.getElementById('scan-banner');
+      if (banner.style.display === 'none') return;   // conversations feature is off
+      const n = review.cards.length;
+      document.getElementById('scan-banner-text').textContent =
+        `Slack scan review pending — ${n} card${n === 1 ? '' : 's'}`;
+      document.getElementById('scan-banner-meta').textContent =
+        review.summary ? ` · ${review.summary}` : '';
+      banner.hidden = false;
+      document.getElementById('main-layout').classList.add('has-banner');
+    }).catch(() => { /* no review is the normal state */ });
 
     fetch('/api/project-groups').then(r => r.json()).then(groups => {
       const sel = document.getElementById('new-project-group');

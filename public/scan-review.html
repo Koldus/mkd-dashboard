@@ -1,0 +1,387 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Scan review — Workspace</title>
+  <link rel="icon" type="image/png" href="/favicon.png" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <header>
+    <div class="header-left">
+      <a href="/" class="header-back">&#8592;</a>
+      <span class="header-title">Scan review</span>
+    </div>
+    <div class="header-right">
+      <span class="header-date" id="header-date"></span>
+      <a href="/editor.html?root=notebook" class="header-link" data-feature="notebook">Notebook</a>
+      <a href="/links.html" class="header-link">Links</a>
+    </div>
+  </header>
+
+  <script>
+    fetch('/api/workspace').then(r => r.json()).then(ws => {
+      const features = new Set(ws.features);
+      document.querySelectorAll('[data-feature]').forEach(el => {
+        if (!features.has(el.dataset.feature)) el.style.display = 'none';
+      });
+      document.title = document.title.replace('Workspace', ws.name);
+    });
+  </script>
+
+  <main class="scan-page" id="scan-page"></main>
+
+  <script>
+    document.getElementById('header-date').textContent =
+      new Date().toLocaleDateString('en-GB', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+
+    // Reviews .slack-scan-review.md, the temp approval file /slack-scan leaves at the
+    // workspace root. Every edit here is written straight back into that file — this page
+    // is a comfortable way to edit it, not a second copy of it. Processing the review
+    // (writing conversations.json, moving the watermark, deleting the file) stays with
+    // the skill, which runs when the user tells Claude "done".
+
+    const TYPES    = ['question', 'customer-request', 'reference', 'idea'];
+    const STATUSES = ['unanswered', 'answered', 'saved', 'open'];
+
+    // Cards are filtered by the action the scan proposed. `reply + task` deliberately
+    // matches both of its halves.
+    const FILTERS = [
+      { key: 'all',       label: 'All',        match: () => true },
+      { key: 'reply',     label: 'Reply',      match: c => /reply/.test(c.proposed || '') },
+      { key: 'task',      label: 'Task',       match: c => /task/.test(c.proposed || '') },
+      { key: 'read',      label: 'Read',       match: c => /^read/.test(c.proposed || '') },
+      { key: 'none',      label: 'None',       match: c => /^none/.test(c.proposed || '') },
+      { key: 'uncertain', label: '⚠ Uncertain', match: c => c.uncertain },
+      { key: 'todo',      label: 'Not seen',   match: c => !seen.has(c.id) },
+    ];
+
+    let doc = null;
+    let projects = [];
+    let filter = 'all';
+    let cursor = 0;            // index into the filtered list
+    let seen = new Set();
+    let seenKey = null;
+    let commentDirty = false;
+
+    const page = document.getElementById('scan-page');
+
+    function esc(str) {
+      const d = document.createElement('div');
+      d.textContent = str ?? '';
+      return d.innerHTML;
+    }
+
+    // ── progress, kept per viewer ──────────────────────────────────────────
+    // Which cards have been looked at is a reading aid, not a decision, so it stays in
+    // localStorage and never enters the file. Keyed on the review's own header line, so a
+    // new scan starts from zero.
+
+    function loadSeen(title) {
+      seenKey = 'mkd.scanReview.' + (title || '').replace(/[^\w.-]+/g, '_');
+      try { seen = new Set(JSON.parse(localStorage.getItem(seenKey) || '[]')); }
+      catch { seen = new Set(); }
+    }
+
+    function markSeen(id) {
+      if (seen.has(id)) return;
+      seen.add(id);
+      try { localStorage.setItem(seenKey, JSON.stringify([...seen])); } catch { /* private window */ }
+    }
+
+    // ── data ───────────────────────────────────────────────────────────────
+
+    function filtered() {
+      const f = FILTERS.find(x => x.key === filter) || FILTERS[0];
+      return doc.cards.filter(f.match);
+    }
+
+    function currentCard() {
+      const list = filtered();
+      return list[Math.min(cursor, list.length - 1)] || null;
+    }
+
+    async function patchCard(card, patch) {
+      const res = await fetch(`/api/scan-review/${encodeURIComponent(card.id)}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(patch),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        alert(`Could not save: ${err.error || res.status}`);
+        return null;
+      }
+      const fresh = await res.json();
+      // Replace the card in place so the file stays the single source of truth.
+      const i = doc.cards.findIndex(c => c.id === card.id);
+      if (i >= 0) doc.cards[i] = fresh;
+      markSeen(card.id);
+      return fresh;
+    }
+
+    // ── render ─────────────────────────────────────────────────────────────
+
+    function render() {
+      if (!doc || !doc.exists) {
+        page.innerHTML = `
+          <div class="scan-empty">
+            <p class="placeholder-msg">No review pending</p>
+            <p class="placeholder-hint">Run <code>/slack-scan</code> to produce one. Its review file
+            appears here for you to go through card by card.</p>
+          </div>`;
+        return;
+      }
+
+      const list = filtered();
+      if (cursor >= list.length) cursor = Math.max(0, list.length - 1);
+      const card = list[cursor] || null;
+
+      page.innerHTML = `
+        <div class="scan-topbar">
+          <div class="scan-topbar-main">
+            <h1 class="scan-title">${esc(doc.title)}</h1>
+            <p class="scan-meta">${esc(doc.window || '')}</p>
+            <p class="scan-meta">${esc(doc.summary || '')}</p>
+          </div>
+          <div class="scan-topbar-side">
+            <span class="scan-progress">${seen.size} / ${doc.cards.length} seen</span>
+            <button class="links-action-btn" id="scan-overview-btn">Overview</button>
+          </div>
+        </div>
+
+        <div class="scan-filters">
+          ${FILTERS.map(f => {
+            const n = doc.cards.filter(f.match).length;
+            return `<button class="scan-filter${f.key === filter ? ' active' : ''}"
+                            data-filter="${f.key}"${n ? '' : ' disabled'}>${esc(f.label)} ${n}</button>`;
+          }).join('')}
+        </div>
+
+        <div class="scan-strip">
+          ${list.map((c, i) => `
+            <button class="scan-chip${i === cursor ? ' current' : ''}${seen.has(c.id) ? ' seen' : ''}"
+                    data-jump="${i}" title="${esc(c.title)}">${c.number}${c.uncertain ? ' ⚠' : ''}</button>
+          `).join('')}
+        </div>
+
+        <div class="scan-nav">
+          <button class="links-action-btn" id="scan-prev"${cursor > 0 ? '' : ' disabled'}>← Prev</button>
+          <span class="scan-counter">${list.length ? `card ${cursor + 1} of ${list.length}` : 'no cards match'}</span>
+          <button class="links-action-btn" id="scan-next"${cursor < list.length - 1 ? '' : ' disabled'}>Next →</button>
+        </div>
+
+        <div id="scan-card">${card ? cardHTML(card) : ''}</div>
+
+        ${seen.size === doc.cards.length ? `
+          <p class="scan-done">Every card has been through. Tell Claude <strong>done</strong> to
+          apply the review — it will write <code>conversations.json</code>, move the scan watermark
+          and delete the review file.</p>` : ''}
+
+        <div class="scan-overview" id="scan-overview" hidden>
+          ${doc.sections.map(s => `
+            <section class="readme-widget">
+              <div class="readme-widget-header">${esc(s.name)}</div>
+              <div class="readme-widget-body prose">${s.html}</div>
+            </section>`).join('')}
+        </div>`;
+
+      bind();
+    }
+
+    function cardHTML(card) {
+      const d = card.decision || {};
+      const tracked = card.kind !== 'new';
+      const applyKey = tracked ? 'apply' : 'save';
+      const applyLabel = tracked ? 'Apply' : 'Save';
+      const applyValues = tracked ? ['yes', 'keep'] : ['yes', 'ignore'];
+
+      // Never drop a project the file already carries, even if it isn't in /api/projects.
+      const projectValues = [...new Set(['none', ...projects, d.project].filter(Boolean))];
+
+      return `
+        <article class="scan-card" data-id="${esc(card.id)}">
+          <div class="scan-card-head">
+            <span class="scan-card-number">${card.number}</span>
+            <h2 class="scan-card-title">${esc(card.title)}</h2>
+            ${card.uncertain ? '<span class="scan-warn" title="Flagged as an uncertain call">⚠</span>' : ''}
+          </div>
+
+          <div class="scan-card-badges">
+            ${d.type   ? `<span class="conv-badge conv-type-${esc(d.type)}">${esc(d.type)}</span>` : ''}
+            ${d.status ? `<span class="conv-badge conv-status-${esc(d.status)}">${esc(d.status)}</span>` : ''}
+            ${card.proposed ? `<span class="scan-proposed">proposed: <strong>${esc(card.proposed)}</strong></span>` : ''}
+            ${tracked ? `<span class="scan-kind">${esc(card.kind)}</span>` : ''}
+          </div>
+
+          ${card.infoLine ? `<p class="scan-info">${esc(card.infoLine)}</p>` : ''}
+          ${card.threadLine ? `<p class="scan-info">Thread: ${esc(stripLink(card.threadLine))}</p>` : ''}
+          ${card.permalink ? `<p class="scan-info"><a href="${esc(card.permalink)}" target="_blank" rel="noopener">Open in Slack ↗</a></p>` : ''}
+
+          ${card.sections.map(s => `
+            <section class="scan-section">
+              <h3 class="scan-section-title">${esc(s.name)}${s.name === 'Where it stands' ? ' <em>(Claude’s read)</em>' : ''}</h3>
+              <div class="prose">${s.html}</div>
+            </section>`).join('')}
+
+          <section class="scan-decision">
+            <h3 class="scan-section-title">Your decision</h3>
+            <div class="scan-decision-grid">
+              ${selectHTML(applyKey, applyLabel, applyValues, d[applyKey])}
+              ${selectHTML('type', 'Type', TYPES, d.type)}
+              ${selectHTML('status', 'Status', STATUSES, d.status)}
+              ${selectHTML('project', 'Project', projectValues, d.project)}
+            </div>
+          </section>
+
+          <section class="scan-comment">
+            <h3 class="scan-section-title">Comment</h3>
+            <textarea class="conv-notes-textarea" id="scan-comment-text" rows="6">${esc(card.comment)}</textarea>
+            <div class="conv-notes-actions">
+              <button class="link-save-btn" id="scan-comment-save">Save comment</button>
+              <button class="link-cancel-btn" id="scan-comment-cancel">Revert</button>
+              <span class="scan-saved" id="scan-comment-state"></span>
+            </div>
+          </section>
+        </article>`;
+    }
+
+    function selectHTML(key, label, values, current) {
+      return `
+        <label class="scan-field">
+          <span class="scan-field-label">${esc(label)}</span>
+          <select class="task-filter-select" data-key="${key}">
+            ${values.map(v => `<option value="${esc(v)}"${v === current ? ' selected' : ''}>${esc(v)}</option>`).join('')}
+          </select>
+        </label>`;
+    }
+
+    /** The Thread line carries its own `· [Open in Slack](…)`; the link is shown separately. */
+    function stripLink(line) {
+      return line.replace(/\s*·?\s*\[Open in Slack\]\([^)]*\)\s*$/, '').trim();
+    }
+
+    // ── interaction ────────────────────────────────────────────────────────
+
+    function leaveGuard() {
+      if (!commentDirty) return true;
+      return confirm('The comment has unsaved changes. Leave the card anyway?');
+    }
+
+    function go(next) {
+      const list = filtered();
+      if (next < 0 || next >= list.length || !leaveGuard()) return;
+      commentDirty = false;
+      cursor = next;
+      const card = list[cursor];
+      if (card) markSeen(card.id);
+      render();
+    }
+
+    function bind() {
+      const card = currentCard();
+      if (card) markSeen(card.id);
+
+      document.querySelectorAll('[data-filter]').forEach(btn => {
+        btn.addEventListener('click', () => {
+          if (!leaveGuard()) return;
+          commentDirty = false;
+          filter = btn.dataset.filter;
+          cursor = 0;
+          render();
+        });
+      });
+
+      document.querySelectorAll('[data-jump]').forEach(btn => {
+        btn.addEventListener('click', () => go(Number(btn.dataset.jump)));
+      });
+
+      const prev = document.getElementById('scan-prev');
+      const next = document.getElementById('scan-next');
+      if (prev) prev.addEventListener('click', () => go(cursor - 1));
+      if (next) next.addEventListener('click', () => go(cursor + 1));
+
+      const overviewBtn = document.getElementById('scan-overview-btn');
+      const overview = document.getElementById('scan-overview');
+      if (overviewBtn && overview) {
+        overviewBtn.addEventListener('click', () => { overview.hidden = !overview.hidden; });
+      }
+
+      if (!card) return;
+
+      // Each select is the value itself, so it saves on change — the same convention as the
+      // project status widget. The comment gets an explicit Save, like conversation notes.
+      document.querySelectorAll('.scan-decision select').forEach(sel => {
+        sel.addEventListener('change', async () => {
+          const before = sel.dataset.prev || '';
+          const fresh = await patchCard(card, { [sel.dataset.key]: sel.value });
+          if (!fresh) { if (before) sel.value = before; return; }
+          render();
+        });
+        sel.dataset.prev = sel.value;
+      });
+
+      const text = document.getElementById('scan-comment-text');
+      const state = document.getElementById('scan-comment-state');
+      const save = document.getElementById('scan-comment-save');
+      const cancel = document.getElementById('scan-comment-cancel');
+
+      text.addEventListener('input', () => {
+        commentDirty = text.value !== card.comment;
+        state.textContent = commentDirty ? 'unsaved' : '';
+      });
+
+      save.addEventListener('click', async () => {
+        save.disabled = true;
+        save.textContent = 'Saving…';
+        const fresh = await patchCard(card, { comment: text.value });
+        save.disabled = false;
+        save.textContent = 'Save comment';
+        if (!fresh) return;
+        commentDirty = false;
+        state.textContent = 'saved';
+      });
+
+      cancel.addEventListener('click', () => {
+        text.value = card.comment;
+        commentDirty = false;
+        state.textContent = '';
+      });
+    }
+
+    document.addEventListener('keydown', e => {
+      if (!doc || !doc.exists) return;
+      const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement.tagName);
+      if (typing || e.metaKey || e.ctrlKey || e.altKey) return;
+      if (e.key === 'ArrowRight' || e.key === 'j') { e.preventDefault(); go(cursor + 1); }
+      if (e.key === 'ArrowLeft'  || e.key === 'k') { e.preventDefault(); go(cursor - 1); }
+    });
+
+    window.addEventListener('beforeunload', e => {
+      if (commentDirty) { e.preventDefault(); e.returnValue = ''; }
+    });
+
+    // ── load ───────────────────────────────────────────────────────────────
+
+    Promise.all([
+      fetch('/api/scan-review').then(r => r.json()),
+      fetch('/api/projects').then(r => r.json()).catch(() => []),
+    ]).then(([review, projectList]) => {
+      doc = review;
+      // The decision blocks use a project's folder path, the same key tasks and
+      // conversations use — /api/projects gives it with the README appended.
+      projects = (projectList || [])
+        .map(p => (p.path || '').replace(/\/README\.md$/, ''))
+        .filter(Boolean)
+        .sort();
+      if (doc.exists) loadSeen(doc.title);
+      render();
+    }).catch(err => {
+      page.innerHTML = `<p class="placeholder-msg">Could not load the review: ${esc(err.message)}</p>`;
+    });
+  </script>
+
+</body>
+</html>

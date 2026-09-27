@@ -8,6 +8,7 @@ const { detectProjectReadme, insertProjectOverviewRow, parseProjectGroupsFromOve
 const { readTasks, writeTasks, splitTasks } = require('./lib/task-store');
 const { getGitStatus } = require('./lib/git-status');
 const { readConversations, writeConversations } = require('./lib/conversation-store');
+const { readScanReview, setCardDecision } = require('./lib/scan-review-store');
 const {
   readHandoffs,
   splitHandoffs,
@@ -821,6 +822,59 @@ app.put('/api/conversations/:id', (req, res) => {
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
+});
+
+// ── Slack scan review ───────────────────────────────────────────────────────
+// The temp approval file /slack-scan leaves at the workspace root between a scan and the
+// user's "done". It isn't a section root and holds nothing permanent — the filename is a
+// fixed constant, so there is no path to traverse — but it feeds the conversations
+// tracker and shares its vocabulary, so it rides on that feature gate.
+
+// Renders the markdown the store hands back, so the client can drop it into `.prose`
+// without pulling in a parser of its own. Same use of `marked` as GET /api/md.
+function renderScanReview(doc) {
+  if (!doc.exists) return doc;
+  return {
+    ...doc,
+    sections: doc.sections.map(s => ({ ...s, html: marked(s.markdown) })),
+    cards: doc.cards.map(renderScanReviewCard),
+  };
+}
+
+function renderScanReviewCard(card) {
+  return { ...card, sections: card.sections.map(s => ({ ...s, html: marked(s.markdown) })) };
+}
+
+// GET /api/scan-review — the pending review, or { exists: false } when there is none
+app.get('/api/scan-review', (req, res) => {
+  if (!ALLOWED_ROOTS.has('conversations')) return res.status(403).json({ error: 'Forbidden' });
+  try {
+    res.json(renderScanReview(readScanReview(REPO_ROOT)));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// PUT /api/scan-review/:id — write one card's decision block and comment back into the
+// file. Rejects anything the skill would refuse at "done", rather than letting a bad
+// value sit in the file until it blocks the whole run.
+app.put('/api/scan-review/:id', (req, res) => {
+  if (!ALLOWED_ROOTS.has('conversations')) return res.status(403).json({ error: 'Forbidden' });
+
+  const { save, apply, type, status, project, comment } = req.body;
+  const patch = { save, apply, type, status, project, comment };
+  Object.keys(patch).forEach(k => patch[k] === undefined && delete patch[k]);
+  if (!Object.keys(patch).length) return res.status(400).json({ error: 'Nothing to update' });
+
+  let card;
+  try {
+    card = setCardDecision(REPO_ROOT, req.params.id, patch);
+  } catch (err) {
+    // The store throws only on a patch it refuses to write; the file is untouched.
+    return res.status(400).json({ error: err.message });
+  }
+  if (!card) return res.status(404).json({ error: 'Card not found' });
+  res.json(renderScanReviewCard(card));
 });
 
 // ── Handoffs ────────────────────────────────────────────────────────────────

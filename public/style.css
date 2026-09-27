@@ -395,6 +395,10 @@ header {
   height: calc(100vh - 44px - 34px);
 }
 
+/* A pending Slack scan review adds a 40px banner plus its 14px margin above the layout. */
+.split-layout.has-banner { height: calc(100vh - 44px - 54px); }
+.split-layout.has-footer.has-banner { height: calc(100vh - 44px - 34px - 54px); }
+
 .col-left, .col-right {
   display: flex;
   flex-direction: column;
@@ -3146,3 +3150,223 @@ tr:hover .item-delete-btn { display: inline-block; }
   padding: 6px 2px 0;
   margin: 0;
 }
+
+/* ── Slack scan review ──────────────────────────────────────────────────────
+   The one-card-at-a-time reader for .slack-scan-review.md. Reuses .conv-badge,
+   .prose, .task-filter-select and the .link-save-btn/.link-cancel-btn pair; what
+   follows is only the page's own frame. */
+
+.scan-page {
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 24px 20px 60px;
+}
+
+.scan-empty { padding: 60px 0; text-align: center; }
+
+.scan-topbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: var(--gap);
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.scan-title { font-size: 16px; font-weight: 600; margin-bottom: 4px; }
+.scan-meta  { font-size: 11px; color: var(--muted2); line-height: 1.5; }
+
+.scan-topbar-side {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.scan-progress { font-size: 11px; color: var(--muted); white-space: nowrap; }
+
+.scan-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 12px 0;
+}
+
+.scan-filter {
+  appearance: none;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--muted2);
+  font-size: 11px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background 0.1s, color 0.1s, border-color 0.1s;
+}
+
+.scan-filter:hover:not(:disabled) { color: var(--text); background: var(--surface2); }
+.scan-filter.active { color: var(--text); border-color: var(--accent); background: var(--surface2); }
+.scan-filter:disabled { opacity: 0.35; cursor: default; }
+
+.scan-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.scan-chip {
+  appearance: none;
+  min-width: 26px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 10px;
+  padding: 2px 5px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.scan-chip:hover { color: var(--text); }
+.scan-chip.seen { color: var(--muted2); border-color: var(--status-done); }
+.scan-chip.current { color: #fff; background: var(--accent); border-color: var(--accent); }
+
+.scan-nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 0;
+}
+
+.scan-counter { font-size: 11px; color: var(--muted); }
+
+.scan-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 18px 20px;
+}
+
+.scan-card-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.scan-card-number {
+  font-size: 11px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.scan-card-title { font-size: 14px; font-weight: 600; line-height: 1.4; }
+.scan-warn { color: var(--status-backlog); font-size: 12px; }
+
+.scan-card-badges {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 10px 0 6px;
+}
+
+.scan-proposed, .scan-kind { font-size: 11px; color: var(--muted2); }
+
+.scan-kind {
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 1px 5px;
+}
+
+.scan-info {
+  font-size: 11px;
+  color: var(--muted2);
+  line-height: 1.6;
+  word-break: break-word;
+}
+
+.scan-info a { color: var(--accent); text-decoration: none; }
+.scan-info a:hover { text-decoration: underline; }
+
+.scan-section, .scan-decision, .scan-comment {
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+
+.scan-section-title {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
+.scan-section-title em { text-transform: none; letter-spacing: 0; font-weight: 400; }
+
+.scan-decision-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+}
+
+.scan-field { display: flex; flex-direction: column; gap: 4px; }
+
+.scan-field-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+
+.scan-field select { width: 100%; }
+
+.scan-comment .conv-notes-textarea { width: 100%; }
+.scan-saved { font-size: 10px; color: var(--muted); align-self: center; }
+
+.scan-done {
+  margin-top: 18px;
+  padding: 12px 14px;
+  border: 1px solid var(--status-done);
+  border-radius: var(--radius);
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--muted2);
+}
+
+.scan-overview { margin-top: 24px; display: flex; flex-direction: column; gap: var(--gap); }
+.scan-overview table { font-size: 11px; }
+
+/* The banner on the home page, shown only while a review is waiting to be processed.
+   It sits above .split-layout, whose height is a viewport calc, so the banner has a
+   fixed height and the layout subtracts it via .has-banner. */
+.scan-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--gap);
+  height: 40px;
+  margin: 0 var(--gap) var(--gap);
+  padding: 0 14px;
+  background: var(--surface);
+  border: 1px solid var(--status-backlog);
+  border-radius: var(--radius);
+  font-size: 12px;
+}
+
+/* display:flex above would otherwise beat the UA rule for the hidden attribute. */
+.scan-banner[hidden] { display: none; }
+
+.scan-banner-text { color: var(--text); }
+.scan-banner-meta { color: var(--muted); font-size: 11px; }
+
+.scan-banner-link {
+  color: var(--accent);
+  text-decoration: none;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.scan-banner-link:hover { text-decoration: underline; }
