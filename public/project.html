@@ -106,6 +106,20 @@
         </div>
       </div>
 
+      <!-- Handoffs: instruction documents for design studio. Its own panel rather than a
+           third Files tab because it belongs to neither side — it is the bridge between
+           the project and the worktree, and stays visible whichever Files tab is active. -->
+      <div class="proj-panel" id="handoffs-panel" data-feature="projects" hidden>
+        <div class="proj-panel-header">
+          Handoffs
+          <button class="proj-panel-action" id="handoff-add-btn" title="New handoff">+</button>
+        </div>
+        <nav class="proj-panel-body" id="handoff-nav"></nav>
+        <div class="proj-new-file" id="new-handoff-row" hidden>
+          <input class="proj-new-file-input" id="new-handoff-input" placeholder="handoff title" autocomplete="off" spellcheck="false" />
+        </div>
+      </div>
+
     </aside>
 
     <!-- Vertical resize handle between sidebar and editor -->
@@ -857,7 +871,7 @@
 
     // ── Project Checklist widget ────────────────────────────────────────────────
     // Flat variant of the meeting checklist (see meeting.html buildListHTML/wireListHandlers):
-    // no ### groups, no indent controls, no drag-reorder.
+    // no ### groups and no indent controls, but the same drag-to-reorder.
 
     function buildChecklistWidget(sec) {
       const widget = document.createElement('div');
@@ -880,7 +894,8 @@
         html += `<p class="proj-empty">—</p>`;
       }
       sec.items.forEach((it, i) => {
-        html += `<div class="meeting-task" data-idx="${i}">
+        html += `<div class="meeting-task" draggable="true" data-idx="${i}">
+          <span class="drag-handle" title="Drag to reorder">⠿</span>
           <input type="checkbox" ${it.checked ? 'checked' : ''}>
           <span class="task-text">${esc(it.text)}</span>
           <div class="task-controls"><button class="item-delete-btn" title="Delete">×</button></div>
@@ -909,7 +924,67 @@
       renderChecklistBody(bodyEl, sec);
     }
 
+    // Drag state is per-widget; a page can show only one checklist, but keeping it local
+    // avoids leaking between re-renders.
+    function wireChecklistDrag(bodyEl, sec) {
+      let srcIdx = null;
+      let mouseTarget = null;
+      const clearMarkers = () =>
+        bodyEl.querySelectorAll('.drop-above, .drop-below')
+              .forEach(t => t.classList.remove('drop-above', 'drop-below'));
+
+      bodyEl.querySelectorAll('.meeting-task').forEach(task => {
+        task.addEventListener('mousedown', e => { mouseTarget = e.target; });
+
+        // Only the handle starts a drag — otherwise selecting text in an item would.
+        task.addEventListener('dragstart', e => {
+          if (!mouseTarget?.closest('.drag-handle')) { e.preventDefault(); return; }
+          srcIdx = parseInt(task.dataset.idx);
+          task.classList.add('drag-source');
+          e.dataTransfer.effectAllowed = 'move';
+          e.dataTransfer.setData('text/plain', '');
+        });
+
+        task.addEventListener('dragend', () => {
+          task.classList.remove('drag-source');
+          clearMarkers();
+        });
+
+        task.addEventListener('dragover', e => {
+          if (srcIdx === null) return;
+          e.preventDefault();
+          clearMarkers();
+          const rect = task.getBoundingClientRect();
+          task.classList.add(e.clientY < rect.top + rect.height / 2 ? 'drop-above' : 'drop-below');
+        });
+
+        task.addEventListener('dragleave', () => task.classList.remove('drop-above', 'drop-below'));
+
+        task.addEventListener('drop', e => {
+          e.preventDefault();
+          if (srcIdx === null) return;
+          const targetIdx   = parseInt(task.dataset.idx);
+          const insertAfter = task.classList.contains('drop-below');
+          clearMarkers();
+
+          if (srcIdx !== targetIdx) {
+            // The item carries its trailing prose (`after`) with it, the same way the
+            // delete handler re-homes it rather than letting it drift onto a neighbour.
+            const [moved] = sec.items.splice(srcIdx, 1);
+            const ti = targetIdx > srcIdx ? targetIdx - 1 : targetIdx;
+            sec.items.splice(insertAfter ? ti + 1 : ti, 0, moved);
+            srcIdx = null;
+            saveChecklist(sec, bodyEl);
+            return;
+          }
+          srcIdx = null;
+        });
+      });
+    }
+
     function wireChecklistHandlers(bodyEl, sec) {
+      wireChecklistDrag(bodyEl, sec);
+
       bodyEl.querySelectorAll('.meeting-task input[type="checkbox"]').forEach(cb => {
         cb.addEventListener('change', () => {
           sec.items[parseInt(cb.closest('.meeting-task').dataset.idx)].checked = cb.checked;
@@ -1294,6 +1369,117 @@
     document.querySelectorAll('.files-tab').forEach(btn => {
       btn.addEventListener('click', () => { activeFileTab = btn.dataset.tab; refreshFilesTabs(); });
     });
+
+    // ── Handoffs panel ────────────────────────────────────────────────────────
+    // Instruction documents for design studio, stored as markdown under
+    // <project>/handoffs/ with `status: open|closed` in YAML frontmatter.
+    //
+    // This panel is the only place status can be changed by clicking: the editor strips
+    // frontmatter before TipTap sees it, so an open handoff shows its body and no
+    // metadata. (The editor's source mode is the manual fallback.)
+    let handoffsClosedCollapsed = true;
+
+    async function loadHandoffs() {
+      const r = await fetch(`/api/handoffs?project=${encodeURIComponent(projectPath)}`);
+      if (!r.ok) return { open: [], closed: [] };
+      return r.json();
+    }
+
+    async function patchHandoff(id, status) {
+      await fetch(`/api/handoffs/${id.split('/').map(encodeURIComponent).join('/')}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status }),
+      });
+    }
+
+    function handoffRowHtml(h) {
+      const next  = h.status === 'open' ? 'closed' : 'open';
+      const label = h.status === 'open' ? 'Close' : 'Reopen';
+      // `path` is project-root-relative; openFile wants it relative to the project folder.
+      const rel = h.path.slice(projectPath.length + 1);
+      return `<div class="file-row handoff-row" data-id="${esc(h.id)}">` +
+        `<button class="checklist-nav-btn file-nav-btn handoff-open-btn" data-rel="${esc(rel)}">` +
+        `<span class="file-label">${esc(h.title)}</span></button>` +
+        `<button class="links-action-btn handoff-status-btn" data-id="${esc(h.id)}" data-next="${next}">${label}</button>` +
+        `</div>`;
+    }
+
+    async function renderHandoffs() {
+      const panel = document.getElementById('handoffs-panel');
+      const nav   = document.getElementById('handoff-nav');
+      if (!panel || !projectPath || root !== 'projects') return;
+      panel.hidden = false;
+
+      const { open, closed } = await loadHandoffs();
+
+      const openHtml = open.length
+        ? open.map(handoffRowHtml).join('')
+        : `<p class="proj-empty">Nothing open.</p>`;
+
+      const closedHtml = closed.length
+        ? `<button class="handoff-group-toggle" id="handoff-closed-toggle">` +
+          `${handoffsClosedCollapsed ? '▸' : '▾'} Closed (${closed.length})</button>` +
+          (handoffsClosedCollapsed ? '' : closed.map(handoffRowHtml).join(''))
+        : '';
+
+      nav.innerHTML =
+        `<div class="handoff-group-label">Open</div>${openHtml}${closedHtml}`;
+
+      nav.querySelectorAll('.handoff-open-btn').forEach(btn =>
+        btn.addEventListener('click', () => editorApi.openFile(btn.dataset.rel)));
+
+      nav.querySelectorAll('.handoff-status-btn').forEach(btn =>
+        btn.addEventListener('click', async e => {
+          e.stopPropagation();
+          await patchHandoff(btn.dataset.id, btn.dataset.next);
+          renderHandoffs();
+          editorApi.reloadNav();
+        }));
+
+      const toggle = nav.querySelector('#handoff-closed-toggle');
+      if (toggle) toggle.addEventListener('click', () => {
+        handoffsClosedCollapsed = !handoffsClosedCollapsed;
+        renderHandoffs();
+      });
+    }
+
+    (function initHandoffAdd() {
+      const btn   = document.getElementById('handoff-add-btn');
+      const row   = document.getElementById('new-handoff-row');
+      const input = document.getElementById('new-handoff-input');
+      if (!btn) return;
+
+      btn.addEventListener('click', () => {
+        row.hidden = !row.hidden;
+        if (!row.hidden) { input.value = ''; input.focus(); }
+      });
+
+      input.addEventListener('keydown', async e => {
+        if (e.key === 'Escape') { row.hidden = true; return; }
+        if (e.key !== 'Enter') return;
+        const name = input.value.trim();
+        if (!name) return;
+
+        const r = await fetch('/api/handoffs', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ project: projectPath, name }),
+        });
+        if (!r.ok) {
+          const { error } = await r.json().catch(() => ({}));
+          alert(error || 'Could not create the handoff');
+          return;
+        }
+        const created = await r.json();
+        row.hidden = true;
+        await renderHandoffs();
+        editorApi.reloadNav();
+        if (created) editorApi.openFile(created.path.slice(projectPath.length + 1));
+      });
+    })();
+
+    if (root === 'projects' && projectPath) renderHandoffs();
 
     // ── Tasks tab ─────────────────────────────────────────────────────────────
     let taskById = {};

@@ -2037,6 +2037,11 @@ tr:hover .item-delete-btn { display: inline-block; }
 
 .toc-item {
   display: block;
+  /* Without this, a long ToC squeezes its own rows instead of scrolling: .editor-toc is a
+     flex column, so items default to flex-shrink:1 and get compressed to fit the pane.
+     The rows go unreadably thin (still clickable) and overflow-y:auto never triggers,
+     because nothing ever overflows. */
+  flex-shrink: 0;
   font-size: 12px;
   line-height: 1.4;
   color: var(--muted);
@@ -3077,3 +3082,44 @@ tr:hover .item-delete-btn { display: inline-block; }
 }
 
 
+
+/* ── Handoffs panel ───────────────────────────────────────────────────────── */
+/* Instruction documents for design studio. Rows reuse .file-row so they sit flush
+   with the file tree above; only the grouping chrome is new. */
+
+#handoffs-panel { flex: 2; }
+
+.handoff-group-label {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+  padding: 4px 6px 2px;
+}
+
+.handoff-group-toggle {
+  appearance: none;
+  background: none;
+  border: none;
+  width: 100%;
+  text-align: left;
+  font: inherit;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+  padding: 8px 6px 2px;
+  cursor: pointer;
+}
+
+.handoff-group-toggle:hover { color: var(--text); }
+
+.handoff-row .handoff-status-btn {
+  opacity: 0;
+  flex-shrink: 0;
+  transition: opacity 0.1s;
+}
+
+.handoff-row:hover .handoff-status-btn { opacity: 1; }

@@ -163,9 +163,26 @@ Mutations match lines by their **exact raw string** (including leading whitespac
 
 `detectProjectReadme(relPath)` identifies a file as a project-level README if it matches `{group-prefix}/{folder-name}/README.md` exactly (two path segments after the prefix). Project groups come from `workspace.json` in the workspace root — not hardcoded in `server.js`.
 
-## Toast UI Editor
+## Markdown editor
 
-The markdown editor in `project.html` uses Toast UI v3 loaded from CDN. Dark-theme CSS overrides live in `style.css` under the `/* Toast UI Editor overrides */` block. The `style.css` `<link>` must load **after** the Toast UI CDN links — specificity depends on this order. Don't reorder the `<head>` links.
+The editor lives in `public/editor-core.js` and is **TipTap 2**, imported as ES modules from `esm.sh` — not Toast UI, which this file used to claim and which is no longer present anywhere in the codebase.
+
+**YAML frontmatter is preserved but invisible.** `splitFrontmatter` strips a leading `---…---` block before the content reaches TipTap, holds it verbatim in a closure, and re-prepends it in `currentMarkdown()` on every save. Source mode re-splits on edit, so frontmatter can be edited by hand there. Consequences worth knowing:
+
+- A file's frontmatter never appears in the WYSIWYG view. Anything a user needs to *see* belongs in the body, not the frontmatter.
+- Anything that edits frontmatter programmatically must go through a route, not the editor — this is why handoff status is changed from the sidebar.
+- TipTap normalises the **body** on load (list markers, escaping, image syntax), so a saved file is frequently not byte-identical to the one opened. The dirty check compares against serializer output rather than the raw file for exactly this reason.
+
+## Handoffs
+
+Instruction documents written in the workspace and carried out in `gd-design-studio` — "write this scenario, produce that one-pager". **Not `tasks.json` tasks**: a task is a row on a Kanban board, a handoff is a document handed to another repo and another session.
+
+- One markdown file per handoff at `projects/<group>/<project>/handoffs/<name>.md`.
+- State is `status: open|closed` in YAML frontmatter, alongside `created`. Frontmatter rather than `open/`/`closed/` folders because the path is what gets handed across the repo boundary — closing one must not break a link to it.
+- `lib/handoff-store.js` owns parsing and writing. Its YAML handling is deliberately minimal: flat `key: value` pairs, and any line it doesn't recognise is preserved untouched on write. Don't grow it into a general YAML parser; add a dependency if that is ever genuinely needed.
+- Routes mirror the `conversations` pattern: `GET /api/handoffs?project=`, `POST /api/handoffs`, `PUT /api/handoffs/*` (status only). They ride on the `projects` feature gate and the projects-root path guard — no separate root.
+- UI is the Handoffs panel in `project.html`'s sidebar, below Files. It is deliberately **not** a third Files tab: handoffs bridge the project and its worktree, so the panel stays visible whichever Files tab is active.
+- A file with no frontmatter, or an unrecognised status, reads as `open` — an unreadable handoff should surface rather than disappear into Closed.
 
 ## Workspace configuration
 

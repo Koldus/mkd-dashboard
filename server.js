@@ -8,6 +8,13 @@ const { detectProjectReadme, insertProjectOverviewRow, parseProjectGroupsFromOve
 const { readTasks, writeTasks, splitTasks } = require('./lib/task-store');
 const { getGitStatus } = require('./lib/git-status');
 const { readConversations, writeConversations } = require('./lib/conversation-store');
+const {
+  readHandoffs,
+  splitHandoffs,
+  createHandoff,
+  setHandoffStatus,
+  STATUSES: HANDOFF_STATUSES,
+} = require('./lib/handoff-store');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -811,6 +818,69 @@ app.put('/api/conversations/:id', (req, res) => {
 
     writeConversations(REPO_ROOT, all);
     res.json(entry);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Handoffs ────────────────────────────────────────────────────────────────
+// Instruction documents written here and carried out in gd-design-studio. They live
+// under <project>/handoffs/ inside the `projects` root, so they ride on that feature
+// gate and that path guard — no separate root and no new entry in ws.features.
+//
+// Resolves a project-relative path inside the projects root, or null if it escapes.
+function resolveProjectsPath(rel) {
+  const sectionRoot = getSectionRoot('projects');
+  const abs = path.resolve(sectionRoot, rel || '');
+  if (abs !== sectionRoot && !abs.startsWith(sectionRoot + path.sep)) return null;
+  return abs;
+}
+
+// GET /api/handoffs?project=<path> — { open, closed } for one project
+app.get('/api/handoffs', (req, res) => {
+  if (!ALLOWED_ROOTS.has('projects')) return res.status(403).json({ error: 'Forbidden' });
+  const projectPath = req.query.project || '';
+  if (!projectPath) return res.status(400).json({ error: 'project is required' });
+  if (!resolveProjectsPath(projectPath)) return res.status(403).json({ error: 'Forbidden' });
+
+  try {
+    res.json(splitHandoffs(readHandoffs(getSectionRoot('projects'), projectPath)));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/handoffs — create one from the template
+app.post('/api/handoffs', (req, res) => {
+  if (!ALLOWED_ROOTS.has('projects')) return res.status(403).json({ error: 'Forbidden' });
+  const { project, name } = req.body || {};
+  if (!project || !name) return res.status(400).json({ error: 'project and name are required' });
+  if (!resolveProjectsPath(project)) return res.status(403).json({ error: 'Forbidden' });
+
+  try {
+    res.json(createHandoff(getSectionRoot('projects'), project, name));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// PUT /api/handoffs/:id — set status only. :id is the path relative to the projects root.
+// Deliberately a single field: the body of a handoff belongs to the editor, and the only
+// thing the sidebar owns is whether it is still open.
+app.put('/api/handoffs/*', (req, res) => {
+  if (!ALLOWED_ROOTS.has('projects')) return res.status(403).json({ error: 'Forbidden' });
+  const relPath = req.params[0];
+  if (!resolveProjectsPath(relPath)) return res.status(403).json({ error: 'Forbidden' });
+
+  const { status } = req.body || {};
+  if (!HANDOFF_STATUSES.includes(status)) {
+    return res.status(400).json({ error: `status must be one of: ${HANDOFF_STATUSES.join(', ')}` });
+  }
+
+  try {
+    const updated = setHandoffStatus(getSectionRoot('projects'), relPath, status);
+    if (!updated) return res.status(404).json({ error: 'Handoff not found' });
+    res.json(updated);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
