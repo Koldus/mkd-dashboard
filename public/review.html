@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Scan review — Workspace</title>
+  <title>Review — Workspace</title>
   <link rel="icon" type="image/png" href="/favicon.png" />
   <link rel="stylesheet" href="style.css" />
 </head>
@@ -12,7 +12,7 @@
   <header>
     <div class="header-left">
       <a href="/" class="header-back">&#8592;</a>
-      <span class="header-title">Scan review</span>
+      <span class="header-title" id="header-title">Review</span>
     </div>
     <div class="header-right">
       <span class="header-date" id="header-date"></span>
@@ -37,22 +37,34 @@
     document.getElementById('header-date').textContent =
       new Date().toLocaleDateString('en-GB', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
 
-    // Reviews .slack-scan-review.md, the temp approval file /slack-scan leaves at the
-    // workspace root. Every edit here is written straight back into that file — this page
-    // is a comfortable way to edit it, not a second copy of it. Processing the review
-    // (writing conversations.json, moving the watermark, deleting the file) stays with
-    // the skill, which runs when the user tells Claude "done".
+    // Reviews one of the temp approval files the Slack skills leave at the workspace root:
+    // ?which=scan is /slack-scan's .slack-scan-review.md, ?which=inbox is /slack-inbox's
+    // .slack-inbox-review.md. Every edit here is written straight back into that file —
+    // this page is a comfortable way to edit it, not a second copy of it. Processing the
+    // review (writing conversations.json, moving the watermark, deleting the file) stays
+    // with the skill, which runs when the user tells Claude "done".
+
+    const REVIEWS = {
+      scan:  { label: 'Scan review',  skill: '/slack-scan' },
+      inbox: { label: 'Inbox review', skill: '/slack-inbox' },
+    };
+    const whichParam = new URLSearchParams(location.search).get('which');
+    const which = Object.hasOwn(REVIEWS, whichParam) ? whichParam : 'scan';
+    const review = REVIEWS[which];
+    document.getElementById('header-title').textContent = review.label;
+    document.title = document.title.replace('Review', review.label);
 
     const TYPES    = ['question', 'customer-request', 'reference', 'idea'];
     const STATUSES = ['unanswered', 'answered', 'saved', 'open'];
 
-    // Cards are filtered by the action the scan proposed. `reply + task` deliberately
+    // Cards are filtered by the action the skill proposed. `reply + task` deliberately
     // matches both of its halves.
     const FILTERS = [
       { key: 'all',       label: 'All',        match: () => true },
       { key: 'reply',     label: 'Reply',      match: c => /reply/.test(c.proposed || '') },
       { key: 'task',      label: 'Task',       match: c => /task/.test(c.proposed || '') },
       { key: 'read',      label: 'Read',       match: c => /^read/.test(c.proposed || '') },
+      { key: 'update-doc', label: 'Update doc', match: c => /update-doc/.test(c.proposed || '') },
       { key: 'none',      label: 'None',       match: c => /^none/.test(c.proposed || '') },
       { key: 'uncertain', label: '⚠ Uncertain', match: c => c.uncertain },
       { key: 'todo',      label: 'Not seen',   match: c => !seen.has(c.id) },
@@ -77,10 +89,10 @@
     // ── progress, kept per viewer ──────────────────────────────────────────
     // Which cards have been looked at is a reading aid, not a decision, so it stays in
     // localStorage and never enters the file. Keyed on the review's own header line, so a
-    // new scan starts from zero.
+    // new run starts from zero.
 
     function loadSeen(title) {
-      seenKey = 'mkd.scanReview.' + (title || '').replace(/[^\w.-]+/g, '_');
+      seenKey = `mkd.review.${which}.` + (title || '').replace(/[^\w.-]+/g, '_');
       try { seen = new Set(JSON.parse(localStorage.getItem(seenKey) || '[]')); }
       catch { seen = new Set(); }
     }
@@ -104,7 +116,7 @@
     }
 
     async function patchCard(card, patch) {
-      const res = await fetch(`/api/scan-review/${encodeURIComponent(card.id)}`, {
+      const res = await fetch(`/api/review/${which}/${encodeURIComponent(card.id)}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(patch),
@@ -129,7 +141,7 @@
         page.innerHTML = `
           <div class="scan-empty">
             <p class="placeholder-msg">No review pending</p>
-            <p class="placeholder-hint">Run <code>/slack-scan</code> to produce one. Its review file
+            <p class="placeholder-hint">Run <code>${esc(review.skill)}</code> to produce one. Its review file
             appears here for you to go through card by card.</p>
           </div>`;
         return;
@@ -177,8 +189,8 @@
 
         ${seen.size === doc.cards.length ? `
           <p class="scan-done">Every card has been through. Tell Claude <strong>done</strong> to
-          apply the review — it will write <code>conversations.json</code>, move the scan watermark
-          and delete the review file.</p>` : ''}
+          apply the review — ${esc(review.skill)} will write <code>conversations.json</code>, move
+          its watermark and delete the review file.</p>` : ''}
 
         <div class="scan-overview" id="scan-overview" hidden>
           ${doc.sections.map(s => `
@@ -366,7 +378,7 @@
     // ── load ───────────────────────────────────────────────────────────────
 
     Promise.all([
-      fetch('/api/scan-review').then(r => r.json()),
+      fetch(`/api/review/${which}`).then(r => r.json()),
       fetch('/api/projects').then(r => r.json()).catch(() => []),
     ]).then(([review, projectList]) => {
       doc = review;

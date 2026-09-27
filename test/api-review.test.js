@@ -6,11 +6,11 @@ const os      = require('os');
 const path    = require('path');
 
 const {
-  readScanReview,
+  readReview,
   setCardDecision,
   splitCards,
   rewriteDecisionLine,
-} = require('../lib/scan-review-store');
+} = require('../lib/review-store');
 
 const FIXTURE_WORKSPACE = path.join(__dirname, 'fixtures', 'workspace');
 const FIXTURE_REVIEW    = path.join(__dirname, 'fixtures', 'slack-scan-review.md');
@@ -43,7 +43,7 @@ function boot(features = ['projects', 'meetings', 'conversations']) {
 }
 
 beforeEach(() => {
-  tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mkd-scan-review-test-'));
+  tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mkd-review-test-'));
   fs.cpSync(FIXTURE_WORKSPACE, tempDir, { recursive: true });
   reviewPath = path.join(tempDir, '.slack-scan-review.md');
   boot();
@@ -53,16 +53,16 @@ afterEach(() => {
   fs.rmSync(tempDir, { recursive: true, force: true });
 });
 
-// ── lib/scan-review-store, parsing ───────────────────────────────────────
+// ── lib/review-store, parsing ───────────────────────────────────────
 
-describe('readScanReview', () => {
+describe('readReview (scan)', () => {
   test('reports no pending review when the file is absent', () => {
-    expect(readScanReview(tempDir)).toEqual({ exists: false });
+    expect(readReview(tempDir, 'scan')).toEqual({ exists: false });
   });
 
   test('reads the header and the read-only prose sections', () => {
     placeReview();
-    const doc = readScanReview(tempDir);
+    const doc = readReview(tempDir, 'scan');
 
     expect(doc.exists).toBe(true);
     expect(doc.title).toBe('Slack scan review — 2026-09-27 18:55');
@@ -74,7 +74,7 @@ describe('readScanReview', () => {
 
   test('parses every card, keyed by its card-end marker', () => {
     placeReview();
-    const doc = readScanReview(tempDir);
+    const doc = readReview(tempDir, 'scan');
 
     expect(doc.cards.map(c => c.id)).toEqual([CARD_1, CARD_2, CARD_3]);
     expect(doc.cards.map(c => c.kind)).toEqual(['new', 'new', 'update']);
@@ -85,7 +85,7 @@ describe('readScanReview', () => {
 
   test('parses a new card: meta line, thread line, sections, decision, comment', () => {
     placeReview();
-    const card = readScanReview(tempDir).cards[0];
+    const card = readReview(tempDir, 'scan').cards[0];
 
     expect(card).toMatchObject({
       type: 'question',
@@ -113,7 +113,7 @@ describe('readScanReview', () => {
 
   test('handles a card with no Thread context and a multi-paragraph comment', () => {
     placeReview();
-    const card = readScanReview(tempDir).cards[1];
+    const card = readReview(tempDir, 'scan').cards[1];
 
     expect(card.threadContextMd).toBeNull();
     expect(card.sections.map(s => s.name)).toEqual(['Message', 'Where it stands']);
@@ -124,13 +124,13 @@ describe('readScanReview', () => {
     placeReview();
     // `### 2 · Mirek Koldus · DM · Lukas Ther · Sep 25 13:06` — the channel itself
     // contains a separator, so only the leading number is parsed structurally.
-    expect(readScanReview(tempDir).cards[1].title)
+    expect(readReview(tempDir, 'scan').cards[1].title)
       .toBe('Mirek Koldus · DM · Lukas Ther · Sep 25 13:06');
   });
 
   test('carries the update card shape without special-casing it', () => {
     placeReview();
-    const card = readScanReview(tempDir).cards[2];
+    const card = readReview(tempDir, 'scan').cards[2];
 
     expect(card.kind).toBe('update');
     expect(card.type).toBeNull();                       // no meta line on a tracked thread
@@ -146,7 +146,7 @@ describe('readScanReview', () => {
 
   test('flags the cards the overview marked uncertain', () => {
     placeReview();
-    expect(readScanReview(tempDir).cards.filter(c => c.uncertain).map(c => c.number)).toEqual([2]);
+    expect(readReview(tempDir, 'scan').cards.filter(c => c.uncertain).map(c => c.number)).toEqual([2]);
   });
 });
 
@@ -171,12 +171,12 @@ describe('splitCards / rewriteDecisionLine', () => {
   });
 });
 
-// ── lib/scan-review-store, writing ───────────────────────────────────────
+// ── lib/review-store, writing ───────────────────────────────────────
 
 describe('setCardDecision', () => {
   test('changes one bullet and leaves every other byte alone', () => {
     placeReview();
-    setCardDecision(tempDir, CARD_1, { status: 'answered' });
+    setCardDecision(tempDir, 'scan', CARD_1, { status: 'answered' });
 
     const before = original.split('\n');
     const after  = fs.readFileSync(reviewPath, 'utf8').split('\n');
@@ -190,7 +190,7 @@ describe('setCardDecision', () => {
 
   test('replaces the comment body without disturbing the rest of the card', () => {
     placeReview();
-    setCardDecision(tempDir, CARD_1, { comment: 'Rewritten.\n\nSecond paragraph.' });
+    setCardDecision(tempDir, 'scan', CARD_1, { comment: 'Rewritten.\n\nSecond paragraph.' });
 
     const content = fs.readFileSync(reviewPath, 'utf8');
     expect(content).toContain('**Comment**\n\nRewritten.\n\nSecond paragraph.\n\n<!-- card-end');
@@ -204,7 +204,7 @@ describe('setCardDecision', () => {
 
   test('writes Apply on a tracked card', () => {
     placeReview();
-    const card = setCardDecision(tempDir, CARD_3, { apply: 'keep' });
+    const card = setCardDecision(tempDir, 'scan', CARD_3, { apply: 'keep' });
 
     expect(card.decision.apply).toBe('keep');
     expect(fs.readFileSync(reviewPath, 'utf8')).toContain('- Apply: keep');
@@ -212,7 +212,7 @@ describe('setCardDecision', () => {
 
   test('returns the re-parsed card', () => {
     placeReview();
-    const card = setCardDecision(tempDir, CARD_2, { project: 'active-features/parameters' });
+    const card = setCardDecision(tempDir, 'scan', CARD_2, { project: 'active-features/parameters' });
 
     expect(card.id).toBe(CARD_2);
     expect(card.number).toBe(2);
@@ -222,10 +222,10 @@ describe('setCardDecision', () => {
 
   test('returns null for an unknown card, and when there is no review at all', () => {
     placeReview();
-    expect(setCardDecision(tempDir, 'C000:1.2', { status: 'answered' })).toBeNull();
+    expect(setCardDecision(tempDir, 'scan', 'C000:1.2', { status: 'answered' })).toBeNull();
 
     fs.rmSync(reviewPath);
-    expect(setCardDecision(tempDir, CARD_1, { status: 'answered' })).toBeNull();
+    expect(setCardDecision(tempDir, 'scan', CARD_1, { status: 'answered' })).toBeNull();
   });
 
   test.each([
@@ -238,22 +238,22 @@ describe('setCardDecision', () => {
     ['a multi-line project',    CARD_1, { project: 'a\nb' }],
   ])('refuses %s and writes nothing', (_label, id, patch) => {
     placeReview();
-    expect(() => setCardDecision(tempDir, id, patch)).toThrow();
+    expect(() => setCardDecision(tempDir, 'scan', id, patch)).toThrow();
     expect(fs.readFileSync(reviewPath, 'utf8')).toBe(original);
   });
 });
 
-// ── GET /api/scan-review ─────────────────────────────────────────────────
+// ── GET /api/review/scan ─────────────────────────────────────────────────
 
-describe('GET /api/scan-review', () => {
+describe('GET /api/review/scan', () => {
   test('reports no pending review', async () => {
-    const res = await request(app).get('/api/scan-review').expect(200);
+    const res = await request(app).get('/api/review/scan').expect(200);
     expect(res.body).toEqual({ exists: false });
   });
 
   test('returns the cards with their markdown rendered', async () => {
     placeReview();
-    const res = await request(app).get('/api/scan-review').expect(200);
+    const res = await request(app).get('/api/review/scan').expect(200);
 
     expect(res.body.cards).toHaveLength(3);
     expect(res.body.sections[0].html).toContain('<table>');
@@ -266,17 +266,17 @@ describe('GET /api/scan-review', () => {
   test('403s when the conversations feature is off', async () => {
     placeReview();
     boot(['projects']);
-    await request(app).get('/api/scan-review').expect(403);
+    await request(app).get('/api/review/scan').expect(403);
   });
 });
 
-// ── PUT /api/scan-review/:id ─────────────────────────────────────────────
+// ── PUT /api/review/scan/:id ─────────────────────────────────────────────
 
-describe('PUT /api/scan-review/:id', () => {
+describe('PUT /api/review/scan/:id', () => {
   test('patches a decision and returns the fresh card', async () => {
     placeReview();
     const res = await request(app)
-      .put(`/api/scan-review/${encodeURIComponent(CARD_1)}`)
+      .put(`/api/review/scan/${encodeURIComponent(CARD_1)}`)
       .send({ save: 'ignore', status: 'answered' })
       .expect(200);
 
@@ -292,7 +292,7 @@ describe('PUT /api/scan-review/:id', () => {
   test('patches a comment', async () => {
     placeReview();
     await request(app)
-      .put(`/api/scan-review/${encodeURIComponent(CARD_2)}`)
+      .put(`/api/review/scan/${encodeURIComponent(CARD_2)}`)
       .send({ comment: 'Ask Lukas to file it himself.' })
       .expect(200);
 
@@ -301,13 +301,13 @@ describe('PUT /api/scan-review/:id', () => {
 
   test('400s on an empty patch', async () => {
     placeReview();
-    await request(app).put(`/api/scan-review/${encodeURIComponent(CARD_1)}`).send({}).expect(400);
+    await request(app).put(`/api/review/scan/${encodeURIComponent(CARD_1)}`).send({}).expect(400);
   });
 
   test('400s on a value outside the vocabulary, leaving the file untouched', async () => {
     placeReview();
     const res = await request(app)
-      .put(`/api/scan-review/${encodeURIComponent(CARD_1)}`)
+      .put(`/api/review/scan/${encodeURIComponent(CARD_1)}`)
       .send({ status: 'archived' })
       .expect(400);
 
@@ -317,15 +317,113 @@ describe('PUT /api/scan-review/:id', () => {
 
   test('404s on an unknown card', async () => {
     placeReview();
-    await request(app).put('/api/scan-review/C000%3A1.2').send({ status: 'answered' }).expect(404);
+    await request(app).put('/api/review/scan/C000%3A1.2').send({ status: 'answered' }).expect(404);
   });
 
   test('403s when the conversations feature is off', async () => {
     placeReview();
     boot(['projects']);
     await request(app)
-      .put(`/api/scan-review/${encodeURIComponent(CARD_1)}`)
+      .put(`/api/review/scan/${encodeURIComponent(CARD_1)}`)
       .send({ status: 'answered' })
       .expect(403);
+  });
+});
+
+// ── the inbox review: same format, its own file ──────────────────────────
+
+const FIXTURE_INBOX = path.join(__dirname, 'fixtures', 'slack-inbox-review.md');
+const INBOX_1 = 'C0AQG06LLBE:1790312489.577039';  // kind=new, forwarded, has Your note
+const INBOX_2 = 'D02333SVD51:1789642040.978019';  // kind=new, free-text capture, flagged ⚠
+const INBOX_3 = 'C05R8G66J4D:1790154475.738159';  // kind=update
+
+let inboxPath;
+
+function placeInbox() {
+  inboxPath = path.join(tempDir, '.slack-inbox-review.md');
+  fs.copyFileSync(FIXTURE_INBOX, inboxPath);
+  return fs.readFileSync(inboxPath, 'utf8');
+}
+
+describe('readReview (inbox)', () => {
+  test('reads the header and the read-only prose sections', () => {
+    placeInbox();
+    const doc = readReview(tempDir, 'inbox');
+
+    expect(doc).toMatchObject({
+      exists: true,
+      which: 'inbox',
+      title: 'Slack inbox review — 2026-09-27 21:30',
+      summary: 'Found 2 new threads · 1 update to a tracked thread',
+    });
+    expect(doc.sections.map(s => s.name)).toEqual(['Overview', 'Uncertain calls', 'Left out']);
+  });
+
+  test('parses the cards, Your note included, keyed by the linked conversation', () => {
+    placeInbox();
+    const [forwarded, capture, update] = readReview(tempDir, 'inbox').cards;
+
+    expect([forwarded.id, capture.id, update.id]).toEqual([INBOX_1, INBOX_2, INBOX_3]);
+    expect(forwarded).toMatchObject({ kind: 'new', proposed: 'none', last: '1790312489.577039' });
+    expect(forwarded.permalink)
+      .toBe('https://gooddata.slack.com/archives/C0AQG06LLBE/p1790312489577039');
+    expect(forwarded.sections.map(s => s.name)).toEqual(['Your note', 'Message', 'Where it stands']);
+
+    // A free-text capture has no note of its own — the note is the Message.
+    expect(capture.sections.map(s => s.name)).toEqual(['Message', 'Where it stands']);
+    expect(capture.uncertain).toBe(true);
+
+    expect(update.section).toBe('Updates to tracked threads');
+    expect(update.sections.map(s => s.name)).toEqual(['Your note', 'Proposed update']);
+    expect(update.decision.apply).toBe('yes');
+  });
+
+  test('keeps the two review files independent', () => {
+    placeInbox();
+    expect(readReview(tempDir, 'scan')).toEqual({ exists: false });
+
+    placeReview();
+    const inboxBefore = fs.readFileSync(inboxPath, 'utf8');
+    setCardDecision(tempDir, 'scan', CARD_1, { status: 'answered' });
+    expect(fs.readFileSync(inboxPath, 'utf8')).toBe(inboxBefore);
+
+    setCardDecision(tempDir, 'inbox', INBOX_1, { save: 'ignore' });
+    expect(fs.readFileSync(inboxPath, 'utf8')).toContain('- Save: ignore');
+    expect(fs.readFileSync(reviewPath, 'utf8')).not.toContain('- Save: ignore');
+  });
+
+  test('refuses a review name outside the allowlist', () => {
+    expect(() => readReview(tempDir, '../registry')).toThrow(/Unknown review/);
+    expect(() => setCardDecision(tempDir, 'toString', CARD_1, { save: 'yes' })).toThrow(/Unknown review/);
+  });
+});
+
+describe('/api/review/inbox', () => {
+  test('GET returns the inbox cards', async () => {
+    placeInbox();
+    const res = await request(app).get('/api/review/inbox').expect(200);
+    expect(res.body.which).toBe('inbox');
+    expect(res.body.cards).toHaveLength(3);
+    const note = res.body.cards[0].sections.find(s => s.name === 'Your note');
+    expect(note.html).toContain('<blockquote>');
+  });
+
+  test('PUT patches an inbox card and leaves every other line alone', async () => {
+    const original = placeInbox();
+    await request(app)
+      .put(`/api/review/inbox/${encodeURIComponent(INBOX_2)}`)
+      .send({ project: 'none' })
+      .expect(200);
+
+    const after = fs.readFileSync(inboxPath, 'utf8');
+    expect(after).toBe(original.replace(
+      '- Save: yes\n- Type: idea\n- Status: open\n- Project: active-features/automation-improvements',
+      '- Save: yes\n- Type: idea\n- Status: open\n- Project: none',
+    ));
+  });
+
+  test('404s on an unknown review name', async () => {
+    await request(app).get('/api/review/other').expect(404);
+    await request(app).put(`/api/review/other/${encodeURIComponent(CARD_1)}`).send({ save: 'yes' }).expect(404);
   });
 });

@@ -116,21 +116,22 @@ Routes (`server.js`, mirroring the `links.json` GET/PUT pattern plus per-id muta
 
 **UI**: both `index.html` (global board, left column) and `project.html` (a "Tasks" tab alongside "README", added via `editorApi.openCustomPane`) render a Kanban board through the shared `public/kanban.js` module (`renderKanbanBoard`) — one column per status, drag-and-drop between columns changes status via `PUT /api/tasks/:id`. Don't duplicate board-rendering logic in either page; extend `kanban.js` instead.
 
-### Slack scan review
+### Slack review files
 
-`/slack-scan` doesn't write `conversations.json` directly. It writes a temp approval file, `REPO_ROOT/.slack-scan-review.md` (gitignored), and waits. The user edits each card's **Your decision** bullets and **Comment**; those edits *are* the approval. When they tell Claude "done", the skill validates every card, writes `conversations.json`, advances the watermark in `.slack-scan-state.json`, and deletes the review file. A pending review blocks the next scan.
+Neither Slack skill writes `conversations.json` directly. Each writes a temp approval file and waits: `/slack-scan` writes `REPO_ROOT/.slack-scan-review.md`, `/slack-inbox` writes `REPO_ROOT/.slack-inbox-review.md` (both gitignored). **Same card format, separate files** — the routines run both skills side by side, and each file is processed on its own. The user edits each card's **Your decision** bullets and **Comment**; those edits *are* the approval. When they tell Claude "done", the skill validates every card, writes `conversations.json`, advances its own watermark (`.slack-scan-state.json` / `.slack-inbox-state.json`), and deletes its review file. A pending review blocks only that skill's next run.
 
-`public/scan-review.html` is a one-card-at-a-time reader for that file, backed by `lib/scan-review-store.js` and two routes (`GET /api/scan-review`, `PUT /api/scan-review/:id`). **It is an editor for the same bytes, not a second copy of them** — there is no separate state, and the skill's contract is untouched.
+`public/review.html?which=scan|inbox` is a one-card-at-a-time reader for either file, backed by `lib/review-store.js` and two routes (`GET /api/review/:which`, `PUT /api/review/:which/:id`). `which` is looked up in the store's `REVIEW_FILES` allowlist; anything else is a 404. **It is an editor for the same bytes, not a second copy of them** — there is no separate state, and the skill's contract is untouched.
 
 The store is deliberately **not a markdown parser**. It finds the lines it owns and rewrites only those:
 
 - A card runs from its `### <n> · …` heading to its `<!-- card-end id=… kind=… last=… -->` marker. **The marker, not the array position, identifies a card** — so a file edited by hand in the meantime can't cause a mis-write. Same discipline as `mutateMeeting`.
 - A write touches only the `- Save|Apply|Type|Status|Project:` bullets named in the patch, keeping each bullet's own indentation and spacing, plus the comment body when `comment` is given. Everything else — the quoted message, thread context, overview tables, markers — is written back byte for byte. The tests assert this by diffing the whole file.
 - A missing bullet is an error, not something to append: the shape the skill parses must not change.
-- Sections are read generically from their `**Name**` markers, so the `kind=update` and `kind=close` card shapes (`New replies`, `Proposed update`, `Why close`, and `Apply` instead of `Save`) work without being special-cased.
+- Sections are read generically from their `**Name**` markers, so the `kind=update` and `kind=close` card shapes (`New replies`, `Proposed update`, `Why close`, and `Apply` instead of `Save`) and the inbox's `Your note` work without being special-cased.
+- The `## ` headings that hold cards are matched by name (`CARD_SECTIONS`). `/slack-inbox` reuses `New threads` and `Updates to tracked threads`; a new heading there would render as an empty prose block above the cards.
 - `PUT` validates against the shared vocabulary and refuses anything the skill would reject at "done" — stricter than `PUT /api/conversations/:id`, because a bad value sitting in the file blocks the whole run.
 
-It rides on the `conversations` feature gate (it feeds that tracker and shares its vocabulary); the filename is a fixed constant joined to `REPO_ROOT`, so there is no path to guard. Progress ("seen" cards) is localStorage only, keyed on the review's header line — never written to the file. `index.html` shows a banner while a review is pending; `.split-layout` gets `.has-banner` because its height is a viewport calc.
+It rides on the `conversations` feature gate (it feeds that tracker and shares its vocabulary); the filenames are a fixed allowlist joined to `REPO_ROOT`, so there is no path to guard. Progress ("seen" cards) is localStorage only, keyed on `which` and the review's header line — never written to the file. `index.html` shows **one** banner while either review is pending, with a link per pending file — one banner, not two, because `.split-layout` gets `.has-banner` and its height is a viewport calc that subtracts a single fixed banner height. The CSS classes keep their `scan-` prefix.
 
 ### F1 / worktree feature
 

@@ -8,7 +8,7 @@ const { detectProjectReadme, insertProjectOverviewRow, parseProjectGroupsFromOve
 const { readTasks, writeTasks, splitTasks } = require('./lib/task-store');
 const { getGitStatus } = require('./lib/git-status');
 const { readConversations, writeConversations } = require('./lib/conversation-store');
-const { readScanReview, setCardDecision } = require('./lib/scan-review-store');
+const { REVIEW_FILES, readReview, setCardDecision } = require('./lib/review-store');
 const {
   readHandoffs,
   splitHandoffs,
@@ -824,42 +824,45 @@ app.put('/api/conversations/:id', (req, res) => {
   }
 });
 
-// ── Slack scan review ───────────────────────────────────────────────────────
-// The temp approval file /slack-scan leaves at the workspace root between a scan and the
-// user's "done". It isn't a section root and holds nothing permanent — the filename is a
-// fixed constant, so there is no path to traverse — but it feeds the conversations
-// tracker and shares its vocabulary, so it rides on that feature gate.
+// ── Slack review files ──────────────────────────────────────────────────────
+// The temp approval files /slack-scan and /slack-inbox leave at the workspace root between
+// a run and the user's "done" — `which` is `scan` or `inbox`. They aren't section roots and
+// hold nothing permanent — the filenames are a fixed allowlist in lib/review-store, so
+// there is no path to traverse — but they feed the conversations tracker and share its
+// vocabulary, so they ride on that feature gate.
 
 // Renders the markdown the store hands back, so the client can drop it into `.prose`
 // without pulling in a parser of its own. Same use of `marked` as GET /api/md.
-function renderScanReview(doc) {
+function renderReview(doc) {
   if (!doc.exists) return doc;
   return {
     ...doc,
     sections: doc.sections.map(s => ({ ...s, html: marked(s.markdown) })),
-    cards: doc.cards.map(renderScanReviewCard),
+    cards: doc.cards.map(renderReviewCard),
   };
 }
 
-function renderScanReviewCard(card) {
+function renderReviewCard(card) {
   return { ...card, sections: card.sections.map(s => ({ ...s, html: marked(s.markdown) })) };
 }
 
-// GET /api/scan-review — the pending review, or { exists: false } when there is none
-app.get('/api/scan-review', (req, res) => {
+// GET /api/review/:which — the pending review, or { exists: false } when there is none
+app.get('/api/review/:which', (req, res) => {
   if (!ALLOWED_ROOTS.has('conversations')) return res.status(403).json({ error: 'Forbidden' });
+  if (!Object.hasOwn(REVIEW_FILES, req.params.which)) return res.status(404).json({ error: 'Unknown review' });
   try {
-    res.json(renderScanReview(readScanReview(REPO_ROOT)));
+    res.json(renderReview(readReview(REPO_ROOT, req.params.which)));
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// PUT /api/scan-review/:id — write one card's decision block and comment back into the
+// PUT /api/review/:which/:id — write one card's decision block and comment back into the
 // file. Rejects anything the skill would refuse at "done", rather than letting a bad
 // value sit in the file until it blocks the whole run.
-app.put('/api/scan-review/:id', (req, res) => {
+app.put('/api/review/:which/:id', (req, res) => {
   if (!ALLOWED_ROOTS.has('conversations')) return res.status(403).json({ error: 'Forbidden' });
+  if (!Object.hasOwn(REVIEW_FILES, req.params.which)) return res.status(404).json({ error: 'Unknown review' });
 
   const { save, apply, type, status, project, comment } = req.body;
   const patch = { save, apply, type, status, project, comment };
@@ -868,13 +871,13 @@ app.put('/api/scan-review/:id', (req, res) => {
 
   let card;
   try {
-    card = setCardDecision(REPO_ROOT, req.params.id, patch);
+    card = setCardDecision(REPO_ROOT, req.params.which, req.params.id, patch);
   } catch (err) {
     // The store throws only on a patch it refuses to write; the file is untouched.
     return res.status(400).json({ error: err.message });
   }
   if (!card) return res.status(404).json({ error: 'Card not found' });
-  res.json(renderScanReviewCard(card));
+  res.json(renderReviewCard(card));
 });
 
 // ── Handoffs ────────────────────────────────────────────────────────────────

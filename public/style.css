@@ -3152,7 +3152,7 @@ tr:hover .item-delete-btn { display: inline-block; }
 }
 
 /* ── Slack scan review ──────────────────────────────────────────────────────
-   The one-card-at-a-time reader for .slack-scan-review.md. Reuses .conv-badge,
+   The one-card-at-a-time reader for the Slack review files. Reuses .conv-badge,
    .prose, .task-filter-select and the .link-save-btn/.link-cancel-btn pair; what
    follows is only the page's own frame. */
 
@@ -3370,3 +3370,5 @@ tr:hover .item-delete-btn { display: inline-block; }
 }
 
 .scan-banner-link:hover { text-decoration: underline; }
+
+.scan-banner-links { display: inline-flex; gap: 14px; }

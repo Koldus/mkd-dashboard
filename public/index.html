@@ -20,13 +20,14 @@
     </div>
   </header>
 
-  <!-- Shown only while /slack-scan has left a review file waiting to be processed. -->
+  <!-- Shown only while /slack-scan or /slack-inbox has left a review file waiting to be
+       processed. One banner for both, so the layout's fixed banner height still holds. -->
   <div class="scan-banner" id="scan-banner" data-feature="conversations" hidden>
     <span>
       <span class="scan-banner-text" id="scan-banner-text"></span>
       <span class="scan-banner-meta" id="scan-banner-meta"></span>
     </span>
-    <a href="/scan-review.html" class="scan-banner-link">Review →</a>
+    <span class="scan-banner-links" id="scan-banner-links"></span>
   </div>
 
   <main class="split-layout has-footer" id="main-layout">
@@ -181,20 +182,35 @@
         wsActivityTypes.map(a => `<option value="${a}">${a}</option>`).join('');
     });
 
-    // A pending /slack-scan review blocks the next scan until it's processed, so it nags
-    // from the top of the dashboard rather than waiting to be remembered.
-    fetch('/api/scan-review').then(r => r.ok ? r.json() : { exists: false }).then(review => {
-      if (!review.exists) return;
+    // A pending /slack-scan or /slack-inbox review blocks that skill's next run until it's
+    // processed, so it nags from the top of the dashboard rather than waiting to be
+    // remembered. The routines run both, so both can be pending at once.
+    const PENDING_REVIEWS = [
+      { which: 'scan',  label: 'scan' },
+      { which: 'inbox', label: 'inbox' },
+    ];
+    Promise.all(PENDING_REVIEWS.map(r =>
+      fetch(`/api/review/${r.which}`)
+        .then(res => res.ok ? res.json() : { exists: false })
+        .catch(() => ({ exists: false }))   // no review is the normal state
+        .then(review => ({ ...r, review }))
+    )).then(results => {
+      const pending = results.filter(r => r.review.exists);
+      if (!pending.length) return;
       const banner = document.getElementById('scan-banner');
       if (banner.style.display === 'none') return;   // conversations feature is off
-      const n = review.cards.length;
+      const cards = r => `${r.review.cards.length} card${r.review.cards.length === 1 ? '' : 's'}`;
       document.getElementById('scan-banner-text').textContent =
-        `Slack scan review pending — ${n} card${n === 1 ? '' : 's'}`;
+        `Slack review pending — ${pending.map(r => `${r.label}: ${cards(r)}`).join(' · ')}`;
+      // With one review the header line fits; with two it would push the links off the row.
       document.getElementById('scan-banner-meta').textContent =
-        review.summary ? ` · ${review.summary}` : '';
+        pending.length === 1 && pending[0].review.summary ? ` · ${pending[0].review.summary}` : '';
+      document.getElementById('scan-banner-links').innerHTML = pending
+        .map(r => `<a href="/review.html?which=${r.which}" class="scan-banner-link">${r.label[0].toUpperCase() + r.label.slice(1)} review →</a>`)
+        .join('');
       banner.hidden = false;
       document.getElementById('main-layout').classList.add('has-banner');
-    }).catch(() => { /* no review is the normal state */ });
+    });
 
     fetch('/api/project-groups').then(r => r.json()).then(groups => {
       const sel = document.getElementById('new-project-group');
